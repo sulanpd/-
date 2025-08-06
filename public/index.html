@@ -12,11 +12,7 @@
             user-select: none;
             color: #fff;
         }
-        #hud {
-            top: 16px;
-            font-size: 22px;
-            z-index: 10;
-        }
+        #hud { top: 16px; font-size: 22px; z-index: 10; }
         #skills {
             top: 80px;
             background: rgba(30,30,40,0.97);
@@ -36,10 +32,7 @@
             padding: 6px 15px;
             cursor: pointer;
         }
-        .skill-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        .skill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         #openSkills {
             background: #42b4e6;
             color: #fff;
@@ -94,7 +87,7 @@
     <div id="deathMsg"></div>
     <canvas id="game"></canvas>
     <script>
-    // ============ Referências ===========
+    // ========= Referências ===========
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const scoreDiv = document.getElementById('score');
@@ -128,24 +121,20 @@
         angle: 0,
         radius: 28,
         color: "#4ccfff",
-
         hp: BASE_HP,
         maxHp: BASE_HP,
         dmg: BASE_DMG,
         speed: BASE_SPEED,
         def: BASE_DEF,
         mob: BASE_MOB,
-
         xp: 0,
         level: 1,
         xpToNext: 60,
         points: 0,
-        skill: {
-            dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0
-        },
-
+        skill: { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0 },
         alive: true,
-        respawnTimer: 0
+        respawnTimer: 0,
+        contactBlocks: {}
     };
 
     function getPlayerRegen() {
@@ -159,19 +148,15 @@
         }
         return total;
     }
-
     function getPlayerDefPercent() {
         // Cada ponto em defesa = 0.5% de redução, precisa de 3 pontos pra adicionar 1
         return Math.min(0.8, (Math.floor(player.skill.def/3) * 0.005));
     }
-
     function getPlayerDmgMultiplier() {
         // Cada ponto = +0.1% de dano
         return 1 + (player.skill.dmg * 0.001);
     }
-
     function playerBaseStats() {
-        // Cálculo dos status, buffs a cada 10 lvls
         let buffHp = 1 + (Math.floor(player.level/10) * 0.015);
         let buffDmg = 1 + (Math.floor(player.level/10) * 0.01);
         player.maxHp = Math.floor(BASE_HP * buffHp + player.skill.hp * 25);
@@ -181,28 +166,43 @@
         player.mob = BASE_MOB + Math.min(0.5, player.skill.mob * 0.02);
         if (player.hp > player.maxHp) player.hp = player.maxHp;
     }
-
     function xpToNext(level) {
         return Math.floor(60 + 12*Math.pow(level, 1.22));
     }
 
-    // ============ ENTIDADES ============
-    // Blocos de XP
+    // ============ BLOCO ============
+
+    // Dicionário de tipos de blocos
+    const BLOCK_TYPES = {
+        yellow: {
+            color: "#f0e130", hp: 24, xp: 12, dmg: 0.1, size: 32, slow: 0.8 // 20% mais lento
+        },
+        blue: {
+            color: "#3cf", hp: 48, xp: 24, dmg: 0.2, size: 32, slow: 0.6 // 40% mais lento
+        },
+        purple: {
+            color: "#b36ef8", hp: 180, xp: 120, dmg: 1.8, size: 64, slow: 0.2 // 80% mais lento
+        }
+    };
+
+    // ============ BLOCO GERADOR ============
     const blocks = [];
-    const BLOCK_SIZE = 32, NUM_BLOCKS = 16, NUM_BLUE = 6;
-    function spawnBlock(color = "yellow") {
+    const NUM_BLOCKS = 14, NUM_BLUE = 4, NUM_PURPLE = 2;
+    function spawnBlock(type = "yellow") {
         let bx, by, safe;
         do {
-            bx = Math.random() * (MAP_W-80) + 40;
-            by = Math.random() * (MAP_H-80) + 40;
-            safe = SAFE_ZONES.some(z => Math.hypot(bx-z.x,by-z.y) < z.r+40);
+            bx = Math.random() * (MAP_W-120) + 60;
+            by = Math.random() * (MAP_H-120) + 60;
+            safe = SAFE_ZONES.some(z => Math.hypot(bx-z.x,by-z.y) < z.r+50);
         } while (safe);
-        blocks.push({x: bx, y: by, alive: true, color: color});
+        let t = BLOCK_TYPES[type];
+        blocks.push({
+            x: bx, y: by, alive: true, type: type, hp: t.hp, id: Math.random().toString(36).slice(2)
+        });
     }
-    // Amarelos
     for (let i = 0; i < NUM_BLOCKS; i++) spawnBlock("yellow");
-    // Azuis
     for (let i = 0; i < NUM_BLUE; i++) spawnBlock("blue");
+    for (let i = 0; i < NUM_PURPLE; i++) spawnBlock("purple");
 
     // Inimigos
     const enemies = [];
@@ -219,11 +219,11 @@
     }
     for (let i = 0; i < MAX_ENEMIES; i++) spawnEnemy();
 
-    // ============ TIROS ============
+    // TIROS
     const bullets = [];
     const BULLET_SPEED = 10, BULLET_LIFE = 38;
 
-    // ============ CONTROLES ============
+    // CONTROLES
     const keys = {};
     document.addEventListener('keydown', e => {
         if (e.key === "Escape") skillsDiv.style.display = "none";
@@ -259,91 +259,120 @@
     function update() {
         if (!player.alive) {
             player.respawnTimer -= 1/60;
-            if (player.respawnTimer <= 0) {
-                respawnPlayer();
-            }
+            if (player.respawnTimer <= 0) respawnPlayer();
             return;
         }
-        // ===== Player =====
-        let vx = 0, vy = 0, mob = player.mob;
-        if (keys['w']) vy -= player.speed * mob;
-        if (keys['s']) vy += player.speed * mob;
-        if (keys['a']) vx -= player.speed * mob;
-        if (keys['d']) vx += player.speed * mob;
-
+        // Movimento base
+        let vx = 0, vy = 0, mob = player.mob, speed = player.speed;
         let inSafeZone = isInSafeZone(player.x, player.y);
 
+        // Colisão com blocos (resistência/lentidão)
+        let blockSlowest = 1.0; // 1 = sem slow, menor = mais lento
+        for (let block of blocks) {
+            if (!block.alive) continue;
+            let t = BLOCK_TYPES[block.type];
+            // Cálculo de colisão (círculo x quadrado)
+            let closestX = Math.max(block.x - t.size/2, Math.min(player.x, block.x + t.size/2));
+            let closestY = Math.max(block.y - t.size/2, Math.min(player.y, block.y + t.size/2));
+            let dist = Math.hypot(player.x - closestX, player.y - closestY);
+            if (dist < player.radius + 1) {
+                // SLOW
+                if (t.slow < blockSlowest) blockSlowest = t.slow;
+
+                // Timer hit: 1 hit cada 0.25s por bloco
+                if (!player.contactBlocks[block.id]) player.contactBlocks[block.id] = 0;
+                player.contactBlocks[block.id] += 1/60;
+
+                if (player.contactBlocks[block.id] >= 0.25) {
+                    player.contactBlocks[block.id] = 0;
+                    // Player leva dano (defesa reduz tudo)
+                    let blockDmg = t.dmg * (1 - getPlayerDefPercent());
+                    player.hp -= blockDmg;
+                    // Player CAUSA dano ao bloco (igual dano corpo a corpo)
+                    let meleeDmg = Math.max(1, Math.floor(player.dmg * 0.35));
+                    block.hp -= meleeDmg;
+                }
+            } else {
+                player.contactBlocks[block.id] = 0; // Reset timer ao sair do bloco
+            }
+            // Se bloco morreu
+            if (block.hp <= 0 && block.alive) {
+                block.alive = false;
+                addXP(t.xp);
+                setTimeout(()=> spawnBlock(block.type), 1800);
+            }
+        }
+
+        // Aplicar slow do bloco no movimento
+        speed = player.speed * blockSlowest;
+
+        if (keys['w']) player.y -= speed * mob;
+        if (keys['s']) player.y += speed * mob;
+        if (keys['a']) player.x -= speed * mob;
+        if (keys['d']) player.x += speed * mob;
+
         // Não deixa sair do mapa
-        player.x = Math.max(player.radius, Math.min(MAP_W-player.radius, player.x + vx));
-        player.y = Math.max(player.radius, Math.min(MAP_H-player.radius, player.y + vy));
+        player.x = Math.max(player.radius, Math.min(MAP_W-player.radius, player.x));
+        player.y = Math.max(player.radius, Math.min(MAP_H-player.radius, player.y));
         player.angle = Math.atan2(mouseY - (player.y - cam.y), mouseX - (player.x - cam.x));
 
-        // Regen (só se tiver ponto em regen)
+        // Regen
         let regen = getPlayerRegen();
         if (regen > 0) {
             player.hp = Math.min(player.maxHp, player.hp + regen * (inSafeZone ? 1.6 : 0.7));
         }
 
-        // ===== Bullets =====
+        // Bullets
         for (let b of bullets) {
             b.x += b.dx;
             b.y += b.dy;
             b.life--;
         }
         for (let i = bullets.length-1; i >=0; i--) {
-            if (bullets[i].life <=0)
-                bullets.splice(i,1);
+            if (bullets[i].life <=0) bullets.splice(i,1);
         }
 
-        // ===== Blocks =====
+        // Blocos colididos por tiros (ranged)
         for (let block of blocks) {
             if (!block.alive) continue;
-            // Colisão com tiros
+            let t = BLOCK_TYPES[block.type];
             for (let b of bullets) {
                 if (
-                    b.x > block.x - BLOCK_SIZE/2 &&
-                    b.x < block.x + BLOCK_SIZE/2 &&
-                    b.y > block.y - BLOCK_SIZE/2 &&
-                    b.y < block.y + BLOCK_SIZE/2
+                    b.x > block.x - t.size/2 &&
+                    b.x < block.x + t.size/2 &&
+                    b.y > block.y - t.size/2 &&
+                    b.y < block.y + t.size/2
                 ) {
-                    block.alive = false;
+                    block.hp -= b.dmg;
                     b.life = 0;
-                    addXP((block.color==="blue"?2:1)*(12 + Math.floor(player.level/3)));
-                    setTimeout(()=> spawnBlock(block.color), 1800);
                 }
             }
-            // Colisão com player (circular <-> quadrado simples)
-            let closestX = Math.max(block.x - BLOCK_SIZE/2, Math.min(player.x, block.x + BLOCK_SIZE/2));
-            let closestY = Math.max(block.y - BLOCK_SIZE/2, Math.min(player.y, block.y + BLOCK_SIZE/2));
-            let dist = Math.hypot(player.x - closestX, player.y - closestY);
-            if (dist < player.radius) {
-                // Dano ao player ao encostar no bloco
-                player.hp -= (block.color==="blue"?0.5:0.25)/60;
+            if (block.hp <= 0 && block.alive) {
+                block.alive = false;
+                addXP(t.xp);
+                setTimeout(()=> spawnBlock(block.type), 1800);
             }
         }
 
         // ===== Enemies =====
         for (let enemy of enemies) {
             if (!enemy.alive) continue;
-
-            // Inimigos não entram em zona segura
             let inSafe = isInAnySafeZone(enemy.x, enemy.y, ENEMY_SIZE/2+6);
             let dx = player.x - enemy.x, dy = player.y - enemy.y;
             let dist = Math.hypot(dx,dy);
 
             if (!inSafe) {
-                let speed = 1.7 + Math.random()*0.6;
+                let espeed = 1.7 + Math.random()*0.6;
                 if (dist < 300) {
-                    enemy.x += dx/dist*speed*0.77 + (Math.random()-0.5)*0.7;
-                    enemy.y += dy/dist*speed*0.77 + (Math.random()-0.5)*0.7;
+                    enemy.x += dx/dist*espeed*0.77 + (Math.random()-0.5)*0.7;
+                    enemy.y += dy/dist*espeed*0.77 + (Math.random()-0.5)*0.7;
                 } else {
                     enemy.x += (Math.random()-0.5)*1.2;
                     enemy.y += (Math.random()-0.5)*1.2;
                 }
-                // Mantém no mapa
                 enemy.x = Math.max(ENEMY_SIZE/2, Math.min(MAP_W-ENEMY_SIZE/2, enemy.x));
                 enemy.y = Math.max(ENEMY_SIZE/2, Math.min(MAP_H-ENEMY_SIZE/2, enemy.y));
-                // NUNCA entra na zona segura, é repelido levemente pra fora (evita "travar")
+                // NUNCA entra na zona segura
                 for (const zone of SAFE_ZONES) {
                     let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
                     if (dz < zone.r + ENEMY_SIZE/2) {
@@ -354,8 +383,6 @@
                     }
                 }
             } else {
-                // Se tentar entrar, apenas circula a borda da zona segura
-                // empurrado levemente pro lado oposto do centro
                 for (const zone of SAFE_ZONES) {
                     let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
                     if (dz < zone.r + ENEMY_SIZE/2) {
@@ -389,7 +416,6 @@
                 if (!inSafeZone) player.hp -= Math.max(2, dmgToPlayer);
             }
 
-            // Morreu de verdade!
             if (enemy.hp <= 0 && enemy.alive) {
                 enemy.alive = false;
                 addXP(48 + Math.floor(player.level/2));
@@ -400,9 +426,7 @@
                         ey = Math.random() * (MAP_H-200) + 100;
                         safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+ENEMY_SIZE/2+6);
                     } while (safe);
-                    enemy.x = ex;
-                    enemy.y = ey;
-                    enemy.hp = 60 + Math.random()*65;
+                    enemy.x = ex; enemy.y = ey; enemy.hp = 60 + Math.random()*65;
                     enemy.alive = true;
                 }, ENEMY_RESPAWN_MS);
             }
@@ -424,7 +448,6 @@
     function draw() {
         ctx.clearRect(0, 0, viewW, viewH);
 
-        // Mapa
         ctx.save();
         ctx.translate(-cam.x, -cam.y);
 
@@ -450,15 +473,24 @@
         // Blocos
         for (let block of blocks) {
             if (!block.alive) continue;
+            let t = BLOCK_TYPES[block.type];
             ctx.save();
             ctx.translate(block.x, block.y);
-            ctx.fillStyle = block.color === "blue" ? "#3cf" : "#f0e130";
+            ctx.fillStyle = t.color;
             ctx.strokeStyle = "#fff";
             ctx.lineWidth = 2.4;
             ctx.beginPath();
-            ctx.rect(-BLOCK_SIZE/2, -BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE);
+            ctx.rect(-t.size/2, -t.size/2, t.size, t.size);
             ctx.fill();
             ctx.stroke();
+            // Barra de HP
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = "#111";
+            ctx.fillRect(-t.size/2, -t.size/2-14, t.size, 10);
+            ctx.fillStyle = "#4fc" ;
+            ctx.fillRect(-t.size/2, -t.size/2-14, t.size*(block.hp/t.hp), 10);
+            ctx.strokeStyle = "#fff";
+            ctx.strokeRect(-t.size/2, -t.size/2-14, t.size, 10);
             ctx.restore();
         }
 
@@ -543,7 +575,6 @@
         return SAFE_ZONES.some(z => Math.hypot(x-z.x, y-z.y) < z.r+buffer);
     }
 
-    // =============== HUD e XP ================
     function updateHUD() {
         scoreDiv.innerHTML =
             `Nível: <b>${player.level}</b> &nbsp;&nbsp; Vida: <b>${player.alive?Math.round(player.hp):0}/${player.maxHp}</b>`;
@@ -571,7 +602,6 @@
         }
     }
 
-    // ============= Árvore de Habilidades ============
     function renderSkills() {
         skillsDiv.innerHTML = `<h2>Árvore de Habilidades</h2>
         <div style="font-size:15px; margin-bottom:14px;">
@@ -649,7 +679,6 @@
         skillsDiv.style.display = skillsDiv.style.display === "none" ? "block" : "none";
     };
 
-    // ============== Resize (mapa) =================
     window.addEventListener('resize', () => {
         viewW = window.innerWidth; viewH = window.innerHeight;
         canvas.width = viewW; canvas.height = viewH;
@@ -663,9 +692,9 @@
         player.alive = true;
         player.respawnTimer = 0;
         deathMsg.style.display = "none";
+        player.contactBlocks = {};
     }
 
-    // ============== Inicialização ================
     canvas.width = viewW; canvas.height = viewH;
     playerBaseStats();
     updateHUD();
