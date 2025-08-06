@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Diep.io RPG Single Player</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; }
+        canvas { display: block; background: #222; margin: auto; }
+        #hud, #skills {
+            position: absolute;
+            left: 20px;
+            font-family: Arial, sans-serif;
+            user-select: none;
+            color: #fff;
+        }
+        #hud {
+            top: 16px;
+            font-size: 22px;
+            z-index: 10;
+        }
+        #skills {
+            top: 80px;
+            background: rgba(30,30,40,0.97);
+            padding: 18px 26px 18px 26px;
+            border-radius: 16px;
+            border: 2px solid #345;
+            display: none;
+            z-index: 12;
+        }
+        .skill-btn {
+            background: #191b28;
+            border: 2px solid #3cf;
+            color: #fff;
+            font-size: 18px;
+            border-radius: 12px;
+            margin: 4px;
+            padding: 6px 15px;
+            cursor: pointer;
+        }
+        .skill-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #openSkills {
+            background: #42b4e6;
+            color: #fff;
+            font-size: 16px;
+            border-radius: 9px;
+            padding: 4px 15px;
+            border: none;
+            margin-left: 18px;
+            cursor: pointer;
+        }
+        #xpbar-ct {
+            margin-top: 7px;
+            width: 320px;
+            height: 26px;
+            background: #444;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #67d2ff;
+        }
+        #xpbar {
+            height: 100%;
+            background: linear-gradient(90deg,#1fd1f9,#88e8a0);
+            width: 0%;
+            border-radius: 10px;
+            transition: width 0.22s cubic-bezier(.4,2.3,.2,1);
+        }
+        #deathMsg {
+            position: absolute;
+            top: 40%;
+            left: 0;
+            right: 0;
+            color: #fff;
+            font-size: 48px;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 2px 2px 16px #000, 0 0 12px #46f9;
+            z-index: 20;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <span id="score"></span>
+        <button id="openSkills">Habilidades (<span id="points">0</span> pts)</button>
+        <div id="xpbar-ct">
+            <div id="xpbar"></div>
+        </div>
+    </div>
+    <div id="skills"></div>
+    <div id="deathMsg"></div>
+    <canvas id="game"></canvas>
+    <script>
+    // ============ Referências ===========
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreDiv = document.getElementById('score');
+    const pointsSpan = document.getElementById('points');
+    const xpbar = document.getElementById('xpbar');
+    const skillsDiv = document.getElementById('skills');
+    const openSkills = document.getElementById('openSkills');
+    const deathMsg = document.getElementById('deathMsg');
+
+    // ============ CONFIGS ============
+    const BASE_HP = 100;
+    const BASE_DMG = 25;
+    const BASE_SPEED = 3.2;
+    const BASE_DEF = 0;
+    const BASE_MOB = 1.0;
+
+    // ============ MAPA ===============
+    let viewW = window.innerWidth, viewH = window.innerHeight;
+    const MAP_W = viewW * 3, MAP_H = viewH * 3;
+
+    // Zonas seguras (esquerda, centro, direita)
+    const SAFE_ZONES = [
+        { x: MAP_W / 6, y: MAP_H / 2, r: 160 },
+        { x: MAP_W / 2, y: MAP_H / 2, r: 160 },
+        { x: MAP_W * 5 / 6, y: MAP_H / 2, r: 160 }
+    ];
+
+    // ============ PLAYER ============
+    const player = {
+        x: SAFE_ZONES[1].x, y: SAFE_ZONES[1].y,
+        angle: 0,
+        radius: 28,
+        color: "#4ccfff",
+
+        hp: BASE_HP,
+        maxHp: BASE_HP,
+        dmg: BASE_DMG,
+        speed: BASE_SPEED,
+        def: BASE_DEF,
+        mob: BASE_MOB,
+
+        xp: 0,
+        level: 1,
+        xpToNext: 60,
+        points: 0,
+        skill: {
+            dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0
+        },
+
+        alive: true,
+        respawnTimer: 0
+    };
+
+    function getPlayerRegen() {
+        const pts = player.skill.regen;
+        if (pts < 1) return 0;
+        let total = 0;
+        for (let i = 1; i <= pts; i++) {
+            if (i <= 3) total += 0.01;
+            else if (i <= 6) total += 0.02;
+            else total += 0.03;
+        }
+        return total;
+    }
+
+    function getPlayerDefPercent() {
+        // Cada ponto em defesa = 0.5% de redução, precisa de 3 pontos pra adicionar 1
+        return Math.min(0.8, (Math.floor(player.skill.def/3) * 0.005));
+    }
+
+    function getPlayerDmgMultiplier() {
+        // Cada ponto = +0.1% de dano
+        return 1 + (player.skill.dmg * 0.001);
+    }
+
+    function playerBaseStats() {
+        // Cálculo dos status, buffs a cada 10 lvls
+        let buffHp = 1 + (Math.floor(player.level/10) * 0.015);
+        let buffDmg = 1 + (Math.floor(player.level/10) * 0.01);
+        player.maxHp = Math.floor(BASE_HP * buffHp + player.skill.hp * 25);
+        player.dmg = Math.floor(BASE_DMG * buffDmg * getPlayerDmgMultiplier());
+        player.def = BASE_DEF + Math.floor(player.skill.def/3);
+        player.speed = BASE_SPEED + player.skill.speed * 0.14;
+        player.mob = BASE_MOB + Math.min(0.5, player.skill.mob * 0.02);
+        if (player.hp > player.maxHp) player.hp = player.maxHp;
+    }
+
+    function xpToNext(level) {
+        return Math.floor(60 + 12*Math.pow(level, 1.22));
+    }
+
+    // ============ ENTIDADES ============
+    // Blocos de XP
+    const blocks = [];
+    const BLOCK_SIZE = 32, NUM_BLOCKS = 16, NUM_BLUE = 6;
+    function spawnBlock(color = "yellow") {
+        let bx, by, safe;
+        do {
+            bx = Math.random() * (MAP_W-80) + 40;
+            by = Math.random() * (MAP_H-80) + 40;
+            safe = SAFE_ZONES.some(z => Math.hypot(bx-z.x,by-z.y) < z.r+40);
+        } while (safe);
+        blocks.push({x: bx, y: by, alive: true, color: color});
+    }
+    // Amarelos
+    for (let i = 0; i < NUM_BLOCKS; i++) spawnBlock("yellow");
+    // Azuis
+    for (let i = 0; i < NUM_BLUE; i++) spawnBlock("blue");
+
+    // Inimigos
+    const enemies = [];
+    const ENEMY_SIZE = 38, MAX_ENEMIES = 15;
+    const ENEMY_RESPAWN_MS = 120_000;
+    function spawnEnemy() {
+        let ex, ey, safe;
+        do {
+            ex = Math.random() * (MAP_W-160) + 80;
+            ey = Math.random() * (MAP_H-160) + 80;
+            safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+ENEMY_SIZE/2+8);
+        } while (safe);
+        enemies.push({x: ex, y: ey, hp: 42+Math.random()*60, alive: true, respawnTime: null});
+    }
+    for (let i = 0; i < MAX_ENEMIES; i++) spawnEnemy();
+
+    // ============ TIROS ============
+    const bullets = [];
+    const BULLET_SPEED = 10, BULLET_LIFE = 38;
+
+    // ============ CONTROLES ============
+    const keys = {};
+    document.addEventListener('keydown', e => {
+        if (e.key === "Escape") skillsDiv.style.display = "none";
+        keys[e.key.toLowerCase()] = true;
+    });
+    document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    // Mira
+    let mouseX = viewW/2, mouseY = viewH/2;
+    canvas.addEventListener('mousemove', e => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+    });
+
+    // Atirar
+    document.addEventListener('mousedown', e => {
+        if (!player.alive || e.button !== 0) return;
+        let dx = mouseX - (player.x - cam.x), dy = mouseY - (player.y - cam.y);
+        let angle = Math.atan2(dy, dx);
+        bullets.push({
+            x: player.x + Math.cos(angle) * (player.radius+15),
+            y: player.y + Math.sin(angle) * (player.radius+15),
+            dx: Math.cos(angle) * BULLET_SPEED * player.mob,
+            dy: Math.sin(angle) * BULLET_SPEED * player.mob,
+            life: BULLET_LIFE,
+            dmg: player.dmg
+        });
+    });
+
+    // ============ GAME LOOP ============
+    const cam = {x: 0, y: 0};
+
+    function update() {
+        if (!player.alive) {
+            player.respawnTimer -= 1/60;
+            if (player.respawnTimer <= 0) {
+                respawnPlayer();
+            }
+            return;
+        }
+        // ===== Player =====
+        let vx = 0, vy = 0, mob = player.mob;
+        if (keys['w']) vy -= player.speed * mob;
+        if (keys['s']) vy += player.speed * mob;
+        if (keys['a']) vx -= player.speed * mob;
+        if (keys['d']) vx += player.speed * mob;
+
+        let inSafeZone = isInSafeZone(player.x, player.y);
+
+        // Não deixa sair do mapa
+        player.x = Math.max(player.radius, Math.min(MAP_W-player.radius, player.x + vx));
+        player.y = Math.max(player.radius, Math.min(MAP_H-player.radius, player.y + vy));
+        player.angle = Math.atan2(mouseY - (player.y - cam.y), mouseX - (player.x - cam.x));
+
+        // Regen (só se tiver ponto em regen)
+        let regen = getPlayerRegen();
+        if (regen > 0) {
+            player.hp = Math.min(player.maxHp, player.hp + regen * (inSafeZone ? 1.6 : 0.7));
+        }
+
+        // ===== Bullets =====
+        for (let b of bullets) {
+            b.x += b.dx;
+            b.y += b.dy;
+            b.life--;
+        }
+        for (let i = bullets.length-1; i >=0; i--) {
+            if (bullets[i].life <=0)
+                bullets.splice(i,1);
+        }
+
+        // ===== Blocks =====
+        for (let block of blocks) {
+            if (!block.alive) continue;
+            // Colisão com tiros
+            for (let b of bullets) {
+                if (
+                    b.x > block.x - BLOCK_SIZE/2 &&
+                    b.x < block.x + BLOCK_SIZE/2 &&
+                    b.y > block.y - BLOCK_SIZE/2 &&
+                    b.y < block.y + BLOCK_SIZE/2
+                ) {
+                    block.alive = false;
+                    b.life = 0;
+                    addXP((block.color==="blue"?2:1)*(12 + Math.floor(player.level/3)));
+                    setTimeout(()=> spawnBlock(block.color), 1800);
+                }
+            }
+            // Colisão com player (circular <-> quadrado simples)
+            let closestX = Math.max(block.x - BLOCK_SIZE/2, Math.min(player.x, block.x + BLOCK_SIZE/2));
+            let closestY = Math.max(block.y - BLOCK_SIZE/2, Math.min(player.y, block.y + BLOCK_SIZE/2));
+            let dist = Math.hypot(player.x - closestX, player.y - closestY);
+            if (dist < player.radius) {
+                // Dano ao player ao encostar no bloco
+                player.hp -= (block.color==="blue"?0.5:0.25)/60;
+            }
+        }
+
+        // ===== Enemies =====
+        for (let enemy of enemies) {
+            if (!enemy.alive) continue;
+
+            // Inimigos não entram em zona segura
+            let inSafe = isInAnySafeZone(enemy.x, enemy.y, ENEMY_SIZE/2+6);
+            let dx = player.x - enemy.x, dy = player.y - enemy.y;
+            let dist = Math.hypot(dx,dy);
+
+            if (!inSafe) {
+                let speed = 1.7 + Math.random()*0.6;
+                if (dist < 300) {
+                    enemy.x += dx/dist*speed*0.77 + (Math.random()-0.5)*0.7;
+                    enemy.y += dy/dist*speed*0.77 + (Math.random()-0.5)*0.7;
+                } else {
+                    enemy.x += (Math.random()-0.5)*1.2;
+                    enemy.y += (Math.random()-0.5)*1.2;
+                }
+                // Mantém no mapa
+                enemy.x = Math.max(ENEMY_SIZE/2, Math.min(MAP_W-ENEMY_SIZE/2, enemy.x));
+                enemy.y = Math.max(ENEMY_SIZE/2, Math.min(MAP_H-ENEMY_SIZE/2, enemy.y));
+                // NUNCA entra na zona segura, é repelido levemente pra fora (evita "travar")
+                for (const zone of SAFE_ZONES) {
+                    let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
+                    if (dz < zone.r + ENEMY_SIZE/2) {
+                        let ang = Math.atan2(enemy.y-zone.y, enemy.x-zone.x);
+                        let newDist = zone.r + ENEMY_SIZE/2 + 5;
+                        enemy.x = zone.x + Math.cos(ang)*newDist;
+                        enemy.y = zone.y + Math.sin(ang)*newDist;
+                    }
+                }
+            } else {
+                // Se tentar entrar, apenas circula a borda da zona segura
+                // empurrado levemente pro lado oposto do centro
+                for (const zone of SAFE_ZONES) {
+                    let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
+                    if (dz < zone.r + ENEMY_SIZE/2) {
+                        let ang = Math.atan2(enemy.y-zone.y, enemy.x-zone.x);
+                        let newDist = zone.r + ENEMY_SIZE/2 + 5;
+                        enemy.x = zone.x + Math.cos(ang)*newDist;
+                        enemy.y = zone.y + Math.sin(ang)*newDist;
+                    }
+                }
+            }
+
+            // Colisão com tiro
+            for (let b of bullets) {
+                if (
+                    b.x > enemy.x - ENEMY_SIZE/2 &&
+                    b.x < enemy.x + ENEMY_SIZE/2 &&
+                    b.y > enemy.y - ENEMY_SIZE/2 &&
+                    b.y < enemy.y + ENEMY_SIZE/2
+                ) {
+                    let dmgFinal = b.dmg * (1 - getPlayerDefPercent());
+                    enemy.hp -= dmgFinal;
+                    b.life = 0;
+                }
+            }
+
+            // Se encosta no player: dano (afeta defesa)
+            let dplayer = Math.hypot(enemy.x-player.x, enemy.y-player.y);
+            if (dplayer < ENEMY_SIZE/2 + player.radius-3 && player.hp > 0) {
+                let dmgToPlayer = 14;
+                dmgToPlayer = dmgToPlayer * (1 - getPlayerDefPercent());
+                if (!inSafeZone) player.hp -= Math.max(2, dmgToPlayer);
+            }
+
+            // Morreu de verdade!
+            if (enemy.hp <= 0 && enemy.alive) {
+                enemy.alive = false;
+                addXP(48 + Math.floor(player.level/2));
+                setTimeout(() => {
+                    let ex, ey, safe;
+                    do {
+                        ex = Math.random() * (MAP_W-200) + 100;
+                        ey = Math.random() * (MAP_H-200) + 100;
+                        safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+ENEMY_SIZE/2+6);
+                    } while (safe);
+                    enemy.x = ex;
+                    enemy.y = ey;
+                    enemy.hp = 60 + Math.random()*65;
+                    enemy.alive = true;
+                }, ENEMY_RESPAWN_MS);
+            }
+        }
+
+        // Morre o player se hp zerar!
+        if (player.hp <= 0 && player.alive) {
+            player.alive = false;
+            player.respawnTimer = 2.5;
+            deathMsg.style.display = "block";
+            deathMsg.innerHTML = "Você morreu!<br><span style='font-size:28px'>Respawn em 2,5s</span>";
+        }
+
+        // Camera centralizada
+        cam.x = Math.max(0, Math.min(MAP_W-viewW, player.x - viewW/2));
+        cam.y = Math.max(0, Math.min(MAP_H-viewH, player.y - viewH/2));
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, viewW, viewH);
+
+        // Mapa
+        ctx.save();
+        ctx.translate(-cam.x, -cam.y);
+
+        // Zonas seguras
+        for (const zone of SAFE_ZONES) {
+            ctx.save();
+            ctx.globalAlpha = 0.17;
+            ctx.beginPath();
+            ctx.arc(zone.x, zone.y, zone.r, 0, 2*Math.PI);
+            ctx.fillStyle = "#49fcbf";
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Bordas do mapa
+        ctx.save();
+        ctx.strokeStyle = "#46c";
+        ctx.lineWidth = 12;
+        ctx.globalAlpha = 0.22;
+        ctx.strokeRect(0,0,MAP_W,MAP_H);
+        ctx.restore();
+
+        // Blocos
+        for (let block of blocks) {
+            if (!block.alive) continue;
+            ctx.save();
+            ctx.translate(block.x, block.y);
+            ctx.fillStyle = block.color === "blue" ? "#3cf" : "#f0e130";
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.rect(-BLOCK_SIZE/2, -BLOCK_SIZE/2, BLOCK_SIZE, BLOCK_SIZE);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Inimigos
+        for (let enemy of enemies) {
+            if (!enemy.alive) continue;
+            ctx.save();
+            ctx.translate(enemy.x, enemy.y);
+            ctx.fillStyle = "#e44";
+            ctx.globalAlpha = 0.83;
+            ctx.beginPath();
+            ctx.arc(0,0,ENEMY_SIZE/2,0,2*Math.PI);
+            ctx.fill();
+            // HP bar
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = "#000";
+            ctx.fillRect(-20,-ENEMY_SIZE/2-13,40,10);
+            ctx.fillStyle = "#7f3";
+            ctx.fillRect(-20,-ENEMY_SIZE/2-13,40*(enemy.hp/105),10);
+            ctx.strokeStyle = "#fff";
+            ctx.strokeRect(-20,-ENEMY_SIZE/2-13,40,10);
+            ctx.restore();
+        }
+
+        // Player
+        if (player.alive) {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, 2 * Math.PI);
+            ctx.fill();
+            // Canhão
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(40, 0);
+            ctx.stroke();
+
+            // HP bar
+            ctx.save();
+            ctx.rotate(-player.angle);
+            ctx.fillStyle = "#222";
+            ctx.fillRect(-32,player.radius+7,64,12);
+            ctx.fillStyle = "#55f7";
+            ctx.fillRect(-32,player.radius+7,64*(player.hp/player.maxHp),12);
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 1.6;
+            ctx.strokeRect(-32,player.radius+7,64,12);
+            ctx.restore();
+
+            ctx.restore();
+        }
+
+        // Bullets
+        for (let b of bullets) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, 7, 0, 2 * Math.PI);
+            ctx.fillStyle = "#fff";
+            ctx.fill();
+            ctx.restore();
+        }
+
+        ctx.restore();
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        updateHUD();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function isInSafeZone(x, y) {
+        return SAFE_ZONES.some(z => Math.hypot(x-z.x, y-z.y) < z.r);
+    }
+    function isInAnySafeZone(x, y, buffer=0) {
+        return SAFE_ZONES.some(z => Math.hypot(x-z.x, y-z.y) < z.r+buffer);
+    }
+
+    // =============== HUD e XP ================
+    function updateHUD() {
+        scoreDiv.innerHTML =
+            `Nível: <b>${player.level}</b> &nbsp;&nbsp; Vida: <b>${player.alive?Math.round(player.hp):0}/${player.maxHp}</b>`;
+        pointsSpan.textContent = player.points;
+        let percent = Math.min(100, 100*player.xp/player.xpToNext);
+        xpbar.style.width = percent + "%";
+        xpbar.style.background = percent < 99 ? "linear-gradient(90deg,#1fd1f9,#88e8a0)" : "#FFD700";
+        if (!player.alive) {
+            deathMsg.style.display = "block";
+            deathMsg.innerHTML = "Você morreu!<br><span style='font-size:28px'>Respawn em " + player.respawnTimer.toFixed(1) + "s</span>";
+        } else {
+            deathMsg.style.display = "none";
+        }
+    }
+
+    function addXP(amt) {
+        if (player.level >= 500) return;
+        player.xp += amt;
+        while (player.xp >= player.xpToNext && player.level < 500) {
+            player.xp -= player.xpToNext;
+            player.level++;
+            player.points++;
+            player.xpToNext = xpToNext(player.level);
+            playerBaseStats();
+        }
+    }
+
+    // ============= Árvore de Habilidades ============
+    function renderSkills() {
+        skillsDiv.innerHTML = `<h2>Árvore de Habilidades</h2>
+        <div style="font-size:15px; margin-bottom:14px;">
+        <b>${player.points}</b> pontos disponíveis.<br>
+        <small style="color:#aaa;">Clique nos botões para distribuir pontos. <br>
+        <span style="color:#fa8;">DEFESA e MOBILIDADE custam 3 pontos cada.<br>
+        MOBILIDADE só pode ser aumentada até +50% da velocidade base.</span></small>
+        </div>
+        <table style="font-size:20px;">
+        <tr>
+        <td>Dano:</td>
+        <td>${player.skill.dmg}</td>
+        <td><button class="skill-btn" id="up-dmg" ${player.points<1?'disabled':''}>+1</button></td>
+        </tr>
+        <tr>
+        <td>Defesa:</td>
+        <td>${Math.floor(player.skill.def/3)}</td>
+        <td><button class="skill-btn" id="up-def" ${(player.points<3)?'disabled':''}>+1</button></td>
+        </tr>
+        <tr>
+        <td>HP:</td>
+        <td>${player.skill.hp}</td>
+        <td><button class="skill-btn" id="up-hp" ${player.points<1?'disabled':''}>+1</button></td>
+        </tr>
+        <tr>
+        <td>Regeneração:</td>
+        <td>${player.skill.regen}</td>
+        <td><button class="skill-btn" id="up-regen" ${player.points<1?'disabled':''}>+1</button></td>
+        </tr>
+        <tr>
+        <td>Velocidade:</td>
+        <td>${player.skill.speed}</td>
+        <td><button class="skill-btn" id="up-speed" ${player.points<1?'disabled':''}>+1</button></td>
+        </tr>
+        <tr>
+        <td>Mobilidade:</td>
+        <td>${player.skill.mob}</td>
+        <td><button class="skill-btn" id="up-mob" ${(player.points<3||player.skill.mob>=25)?'disabled':''}>+1</button></td>
+        </tr>
+        </table>
+        <div style="margin-top:14px;font-size:15px;color:#bfc;">Cada 10 níveis: <b>+1.5% HP</b> e <b>+1% Dano</b> (acumulativo).</div>
+        <div style="margin-top:10px;">
+            <button class="skill-btn" id="fechar">Fechar</button>
+        </div>`;
+        document.getElementById('up-dmg').onclick = ()=>{
+            if(player.points>=1){ player.skill.dmg++; player.points--; playerBaseStats(); renderSkills();}
+        };
+        document.getElementById('up-def').onclick = ()=>{
+            if(player.points>=3){ player.skill.def+=3; player.points-=3; playerBaseStats(); renderSkills();}
+        };
+        document.getElementById('up-hp').onclick = ()=>{
+            if(player.points>=1){ player.skill.hp++; player.points--; playerBaseStats(); renderSkills();}
+        };
+        document.getElementById('up-regen').onclick = ()=>{
+            if(player.points>=1){ player.skill.regen++; player.points--; playerBaseStats(); renderSkills();}
+        };
+        document.getElementById('up-speed').onclick = ()=>{
+            if(player.points>=1){ player.skill.speed++; player.points--; playerBaseStats(); renderSkills();}
+        };
+        document.getElementById('up-mob').onclick = ()=>{
+            if(player.points>=3 && player.skill.mob<25){
+                player.skill.mob++;
+                player.points-=3;
+                playerBaseStats();
+                renderSkills();
+            }
+        };
+        document.getElementById('fechar').onclick = ()=>{
+            skillsDiv.style.display = "none";
+        };
+    }
+
+    openSkills.onclick = ()=>{
+        renderSkills();
+        skillsDiv.style.display = skillsDiv.style.display === "none" ? "block" : "none";
+    };
+
+    // ============== Resize (mapa) =================
+    window.addEventListener('resize', () => {
+        viewW = window.innerWidth; viewH = window.innerHeight;
+        canvas.width = viewW; canvas.height = viewH;
+    });
+
+    function respawnPlayer() {
+        const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
+        player.x = zona.x;
+        player.y = zona.y;
+        player.hp = player.maxHp;
+        player.alive = true;
+        player.respawnTimer = 0;
+        deathMsg.style.display = "none";
+    }
+
+    // ============== Inicialização ================
+    canvas.width = viewW; canvas.height = viewH;
+    playerBaseStats();
+    updateHUD();
+    gameLoop();
+    </script>
+</body>
+</html>
