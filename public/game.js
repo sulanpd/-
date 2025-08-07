@@ -781,5 +781,11 @@ function draw() {
     ctx.restore();
 }
 
-// ===== INICIA O GAME LOOP =====
+function gameLoop() {
+    update();
+    draw();
+    updateHUD();
+    requestAnimationFrame(gameLoop);
+}
+
 gameLoop();
