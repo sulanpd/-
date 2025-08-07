@@ -97,7 +97,7 @@ function update() {
 
     // --- Respawn automático após morte ---
     if (!player.alive) {
-        player.respawnTimer -= 1/60;
+        player.respawnTimer -= 1 / 60;
         if (player.respawnTimer <= 0) {
             const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
             player.x = zona.x;
@@ -124,13 +124,13 @@ function update() {
     for (let block of blocks) {
         if (!block.alive) continue;
         let t = BLOCK_TYPES[block.type];
-        let closestX = Math.max(block.x - t.size/2, Math.min(player.x, block.x + t.size/2));
-        let closestY = Math.max(block.y - t.size/2, Math.min(player.y, block.y + t.size/2));
+        let closestX = Math.max(block.x - t.size / 2, Math.min(player.x, block.x + t.size / 2));
+        let closestY = Math.max(block.y - t.size / 2, Math.min(player.y, block.y + t.size / 2));
         let dist = Math.hypot(player.x - closestX, player.y - closestY);
         if (dist < player.radius + 1) {
             if (t.slow < blockSlowest) blockSlowest = t.slow;
             if (!player.contactBlocks[block.id]) player.contactBlocks[block.id] = 0;
-            player.contactBlocks[block.id] += 1/60;
+            player.contactBlocks[block.id] += 1 / 60;
             if (player.contactBlocks[block.id] >= 0.25) {
                 player.contactBlocks[block.id] = 0;
                 let blockDmg = t.dmg * (1 - getPlayerDefPercent());
@@ -144,7 +144,7 @@ function update() {
         if (block.hp <= 0 && block.alive) {
             block.alive = false;
             addXP(getPlayerBonusXP(t.xp));
-            setTimeout(()=> spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
+            setTimeout(() => spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
         }
     }
 
@@ -154,8 +154,8 @@ function update() {
     if (keys['a']) player.x -= speed * mob;
     if (keys['d']) player.x += speed * mob;
 
-    player.x = clamp(player.x, player.radius, MAP_W-player.radius);
-    player.y = clamp(player.y, player.radius, MAP_H-player.radius);
+    player.x = clamp(player.x, player.radius, MAP_W - player.radius);
+    player.y = clamp(player.y, player.radius, MAP_H - player.radius);
     player.angle = Math.atan2(mouseY - (player.y - cam.y), mouseX - (player.x - cam.x));
 
     // (Seu código de regen, tiros, inimigos, boss, XP, conquistas, etc)
