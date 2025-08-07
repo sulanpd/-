@@ -24,10 +24,11 @@ canvas.height = viewH;
 
 // Zonas seguras (mesmo conceito de antes)
 export const SAFE_ZONES = [
-    { x: viewW * 3 / 6, y: viewH * 3 / 2, r: 160 },
-    { x: viewW * 3 / 2, y: viewH * 3 / 2, r: 160 },
-    { x: viewW * 5 / 6, y: viewH * 3 / 2, r: 160 }
+    { x: MAP_W / 2, y: MAP_H / 2, r: 160 },                 // centro do mapa
+    { x: 250, y: 250, r: 160 },                             // canto superior esquerdo
+    { x: MAP_W - 250, y: MAP_H - 250, r: 160 }              // canto inferior direito
 ];
+
 
 // Dimensões do mapa (ajuste conforme seu gosto)
 export const MAP_W = viewW * 3;
@@ -234,7 +235,15 @@ function update() {
     if (!player.alive) {
         player.respawnTimer -= 1 / 60;
         if (player.respawnTimer <= 0) {
-            resetPlayer(SAFE_ZONES);
+            // Sempre renasce no centro do mapa ou safe zone realista!
+            const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
+            player.x = zona.x;
+            player.y = zona.y;
+            player.hp = player.maxHp;
+            player.alive = true;
+            player.respawnTimer = 0;
+            player.contactBlocks = {};
+
             playerBaseStats(BASES);
             // Conquistas: contabiliza mortes
             if (player.level > 10) player.deathsAfter10++;
@@ -298,7 +307,7 @@ function update() {
     player.y = clamp(player.y, player.radius, MAP_H - player.radius);
     player.angle = Math.atan2(mouseY - (player.y - cam.y), mouseX - (player.x - cam.x));
 
-    // ========== AJUSTE DA CÂMERA ==========
+    // ========== AJUSTE DA CÂMERA (sempre depois do movimento do player) ==========
     cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
     cam.y = clamp(player.y - viewH / 2, 0, MAP_H - viewH);
 
@@ -419,7 +428,9 @@ function update() {
     }
 
     // --- resto igual ao bloco anterior (shooters, boss, conquistas, etc) ---
+    // (Se quiser o Bloco 4B novamente, é só pedir!)
 }
+
 
 // game.js — Bloco 4B
 
