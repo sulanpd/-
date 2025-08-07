@@ -22,17 +22,16 @@ const viewW = window.innerWidth, viewH = window.innerHeight;
 canvas.width = viewW;
 canvas.height = viewH;
 
+// Dimensões do mapa (ajuste conforme seu gosto)
+export const MAP_W = viewW * 3;
+export const MAP_H = viewH * 3;
+
 // Zonas seguras (mesmo conceito de antes)
 export const SAFE_ZONES = [
     { x: MAP_W / 2, y: MAP_H / 2, r: 160 },                 // centro do mapa
     { x: 250, y: 250, r: 160 },                             // canto superior esquerdo
     { x: MAP_W - 250, y: MAP_H - 250, r: 160 }              // canto inferior direito
 ];
-
-
-// Dimensões do mapa (ajuste conforme seu gosto)
-export const MAP_W = viewW * 3;
-export const MAP_H = viewH * 3;
 
 // Variáveis de controle do loop e camera
 const cam = { x: 0, y: 0 };
