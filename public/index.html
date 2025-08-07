@@ -361,7 +361,6 @@
             if (!block.alive) continue;
             let t = BLOCK_TYPES[block.type];
             // Círculo x quadrado (player vs bloco)
-            let closestX
             let closestX = Math.max(block.x - t.size/2, Math.min(player.x, block.x + t.size/2));
             let closestY = Math.max(block.y - t.size/2, Math.min(player.y, block.y + t.size/2));
             let dist = Math.hypot(player.x - closestX, player.y - closestY);
