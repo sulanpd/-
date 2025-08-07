@@ -41,7 +41,13 @@ let bullets = [];
 let shooterBullets = [];
 let keys = {};
 let mouseX = 0, mouseY = 0;
-let BASES = {}; // Ajuste conforme sua lógica de status base do player
+let BASES = {
+  BASE_HP: 100,
+  BASE_DMG: 25,
+  BASE_DEF: 0,
+  BASE_SPEED: 3.2,
+  BASE_MOB: 1.0
+};
 
 // BLOCO 2 — INPUTS E INICIALIZAÇÃO
 
@@ -61,9 +67,9 @@ const SAFE_ZONES = getSafeZones();
 resetPlayer(SAFE_ZONES);
 playerBaseStats(BASES);
 for (let i = 0; i < 25; i++) {
-    spawnBlock(0, MAP_W, MAP_H, getSafeZones());
-    spawnBlock(1, MAP_W, MAP_H, getSafeZones());
-    spawnBlock(2, MAP_W, MAP_H, getSafeZones());
+    spawnBlock("yellow", MAP_W, MAP_H, getSafeZones());
+    spawnBlock("blue",   MAP_W, MAP_H, getSafeZones());
+    spawnBlock("purple", MAP_W, MAP_H, getSafeZones());
 }
 for (let i = 0; i < 15; i++) {
     spawnEnemy(MAP_W, MAP_H, getSafeZones());
@@ -191,6 +197,19 @@ function draw() {
     ctx.fillRect(cam.x, cam.y, viewW, viewH);
 
     // (Seu código de desenho de blocos, zonas seguras, inimigos, player, tiros, etc.)
+// desenhar blocos
+for (const b of blocks) {
+  if (!b.alive) continue;
+  const t = BLOCK_TYPES[b.type];
+  ctx.fillStyle = t.color;
+  ctx.fillRect(b.x - t.size/2, b.y - t.size/2, t.size, t.size);
+}
+
+// desenhar player
+ctx.beginPath();
+ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
+ctx.fillStyle = player.color;
+ctx.fill();
 
     ctx.restore();
 }
