@@ -1,4 +1,4 @@
-// game.js — versão com XP, colisões, skills e HUD
+// game.js — XP, colisões, skills e HUD (com null-safety no HUD)
 
 import { player, resetPlayer, playerBaseStats, getPlayerDefPercent, getPlayerRegen, getPlayerBonusXP, xpToNext } from "./player.js";
 import { enemies } from "./enemy.js";
@@ -53,20 +53,17 @@ function handleInput(dt) {
   if (keys.has("a") || keys.has("arrowleft"))  vx -= 1;
   if (keys.has("d") || keys.has("arrowright")) vx += 1;
 
-  // normaliza
   if (vx !== 0 || vy !== 0) {
     const len = Math.hypot(vx, vy) || 1;
     vx /= len; vy /= len;
   }
 
-  // slow por contato com blocos
-  const slow = currentSlowFactor; // atualizado em updateCollisions()
+  const slow = currentSlowFactor;
   const spd = player.speed * (1 - slow) * 60 * dt;
 
   player.x += vx * spd;
   player.y += vy * spd;
 
-  // limites do mapa
   const r = player.radius || 28;
   player.x = clamp(player.x, r, MAP_W - r);
   player.y = clamp(player.y, r, MAP_H - r);
@@ -75,7 +72,6 @@ function handleInput(dt) {
 // ====== SPAWN ======
 function initGame() {
   resetPlayer(getSafeZones());
-  // blocos de teste
   for (let i = 0; i < 25; i++) {
     spawnBlock("yellow", MAP_W, MAP_H, getSafeZones());
     spawnBlock("blue",   MAP_W, MAP_H, getSafeZones());
@@ -89,20 +85,18 @@ function centerCameraOnPlayer() {
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
 }
 
-// ====== COLISÕES E COMBATE ======
+// ====== COLISÕES / COMBATE ======
 let score = 0;
 let currentSlowFactor = 0;
 
 function updateCollisions(dt) {
   currentSlowFactor = 0;
 
-  // Regen
-  const regenRate = getPlayerRegen(); // fração por segundo
+  const regenRate = getPlayerRegen();
   if (regenRate > 0 && player.alive) {
     player.hp = Math.min(player.maxHp, player.hp + regenRate * player.maxHp * dt);
   }
 
-  // Player x Blocos: slow + dano por contato; player "minera" o bloco
   for (const b of blocks) {
     if (!b.alive) continue;
     const t = BLOCK_TYPES[b.type];
@@ -114,18 +108,14 @@ function updateCollisions(dt) {
     const overlap = (t.size/2 + player.radius) - dist;
 
     if (overlap > 0) {
-      // slow e dano de contato do bloco
       currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
 
-      // dano que o bloco causa ao player (por segundo), reduzido pela defesa total
       const def = getPlayerDefPercent();
-      const dmgTick = t.dmg * (1 - def) * dt * 10; // *10 para tornar relevante
+      const dmgTick = t.dmg * (1 - def) * dt * 10;
       player.hp -= dmgTick;
 
-      // dano do player ao bloco (mineração por contato)
       b.hp -= Math.max(1, player.dmg) * dt;
 
-      // se bloco morreu: XP + score
       if (b.hp <= 0 && b.alive) {
         b.alive = false;
         const baseXP = t.xp || 0;
@@ -136,10 +126,9 @@ function updateCollisions(dt) {
     }
   }
 
-  // morte do player
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
-    player.respawnTimer = 2.5; // segundos
+    player.respawnTimer = 2.5;
     showDeathMsg(true);
   }
 }
@@ -155,7 +144,7 @@ function addXP(amt) {
 
 function levelUp() {
   player.level += 1;
-  player.points += 1; // 1 ponto por nível
+  player.points += 1;
   player.xpToNext = xpToNext(player.level);
   playerBaseStats(BASES);
   flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
@@ -165,7 +154,6 @@ function updateRespawn(dt) {
   if (!player.alive) {
     player.respawnTimer -= dt;
     if (player.respawnTimer <= 0) {
-      // respawn
       resetPlayer(getSafeZones());
       playerBaseStats(BASES);
       showDeathMsg(false);
@@ -174,12 +162,11 @@ function updateRespawn(dt) {
 }
 
 // ====== HUD / SKILLS ======
-const hudHp   = document.getElementById("hp");
-const hudLvl  = document.getElementById("level");
-const hudScore= document.getElementById("score");
+const hudHp     = document.getElementById("hp");        // pode não existir no seu HTML
+const hudLvl    = document.getElementById("level");     // pode não existir no seu HTML
+const hudScore  = document.getElementById("score");
 const btnSkills = document.getElementById("openSkills");
 const spanPoints= document.getElementById("points");
-const xpbarCt   = document.getElementById("xpbar-ct");
 const xpbar     = document.getElementById("xpbar");
 const skillsDiv = document.getElementById("skills");
 const eventMsg  = document.getElementById("eventMsg");
@@ -188,12 +175,14 @@ const deathMsg  = document.getElementById("deathMsg");
 btnSkills?.addEventListener("click", () => toggleSkills());
 
 function toggleSkills(force=false) {
-  const show = force === false ? (skillsDiv.style.display !== "block") : force;
+  const show = force === false ? (skillsDiv?.style.display !== "block") : force;
+  if (!skillsDiv) return;
   skillsDiv.style.display = show ? "block" : "none";
   if (show) renderSkills();
 }
 
 function renderSkills() {
+  if (!skillsDiv) return;
   skillsDiv.innerHTML = `
     <h3>Habilidades</h3>
     <p>Pontos: <b>${player.points}</b></p>
@@ -207,10 +196,9 @@ function renderSkills() {
     </div>
     <button id="closeSkills">Fechar</button>
   `;
-  document.getElementById("closeSkills").onclick = () => toggleSkills(false);
+  document.getElementById("closeSkills")?.addEventListener("click", () => toggleSkills(false));
   for (const k of ["dmg","def","hp","regen","speed","mob"]) {
-    const btn = document.getElementById(`up_${k}`);
-    if (btn) btn.onclick = () => upgradeSkill(k);
+    document.getElementById(`up_${k}`)?.addEventListener("click", () => upgradeSkill(k));
   }
 }
 
@@ -234,14 +222,14 @@ function upgradeSkill(key) {
 }
 
 function updateHUD() {
-  hudHp.textContent = `${Math.ceil(player.hp)}/${player.maxHp}`;
-  hudLvl.textContent = player.level;
-  hudScore.textContent = score;
-  spanPoints.textContent = player.points;
-
-  // barra de XP
-  const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext));
-  xpbar.style.width = Math.floor(pct * 100) + "%";
+  if (hudHp)   hudHp.textContent = `${Math.ceil(player.hp)}/${player.maxHp}`;
+  if (hudLvl)  hudLvl.textContent = player.level;
+  if (hudScore)  hudScore.textContent = score;
+  if (spanPoints) spanPoints.textContent = player.points;
+  if (xpbar) {
+    const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext));
+    xpbar.style.width = Math.floor(pct * 100) + "%";
+  }
 }
 
 function flashEvent(msg) {
@@ -299,7 +287,6 @@ function drawPlayer() {
   ctx.fillStyle = player.color || "#4ccfff";
   ctx.fill();
 
-  // HP bar simples
   if (player.maxHp) {
     const w = 80, h = 8;
     const hpPct = Math.max(0, Math.min(1, player.hp / player.maxHp));
@@ -332,9 +319,7 @@ function update() {
   updateCollisions(dt);
   updateRespawn(dt);
 
-  // câmera
   centerCameraOnPlayer();
-  // HUD
   updateHUD();
 }
 
