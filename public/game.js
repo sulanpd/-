@@ -1,4 +1,4 @@
-// game.js — Safe zones visuais + inimigos (melee, shooters, projéteis, boss)
+// game.js — Player atira; Body Damage; detecção limitada; indetectável em Safe Zone
 
 import {
   player, resetPlayer, playerBaseStats, getPlayerDefPercent,
@@ -18,7 +18,7 @@ import {
 } from "./enemy.js";
 
 import { blocks, BLOCK_TYPES, spawnBlock } from "./blocks.js";
-import { clamp } from "./utils.js";
+import { clamp, isInSafeZone } from "./utils.js";
 
 // ====== CANVAS / MAPA / CÂMERA ======
 const canvas = document.getElementById("game");
@@ -44,7 +44,8 @@ const cam = { x: 0, y: 0 };
 // ====== BASES DO PLAYER ======
 const BASES = {
   BASE_HP:    100,
-  BASE_DMG:   25,
+  BASE_DMG:   25,  // tiros
+  BASE_BODY:  20,  // corpo-a-corpo (novo)
   BASE_DEF:   0,
   BASE_SPEED: 3.2,
   BASE_MOB:   1.0
@@ -52,14 +53,14 @@ const BASES = {
 playerBaseStats(BASES);
 
 // ====== SAFE ZONES ======
-function getSafeZones() {
+function makeSafeZones() {
   return [
     { x: MAP_W * 0.25, y: MAP_H * 0.25, r: 160 },
     { x: MAP_W * 0.75, y: MAP_H * 0.25, r: 160 },
     { x: MAP_W * 0.50, y: MAP_H * 0.75, r: 160 }
   ];
 }
-const SAFE_ZONES = getSafeZones();
+const SAFE_ZONES = makeSafeZones();
 
 // ====== INPUT ======
 const keys = new Set();
@@ -68,6 +69,35 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleSkills(false);
 });
 window.addEventListener("keyup",   (e) => keys.delete(e.key.toLowerCase()));
+
+// ====== MOUSE / TIRO DO PLAYER ======
+const mouse = { x: 0, y: 0, worldX: 0, worldY: 0, shooting: false };
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0) mouse.shooting = true;
+});
+window.addEventListener("mouseup", (e) => {
+  if (e.button === 0) mouse.shooting = false;
+});
+
+function updateMouseWorld() {
+  mouse.worldX = cam.x + mouse.x;
+  mouse.worldY = cam.y + mouse.y;
+}
+
+const PLAYER_FIRE_RATE = 7.5;        // tiros por segundo
+const PLAYER_BULLET_SPEED = 16;      // px/frame (ajustado por dt dentro do update)
+const PLAYER_BULLET_LIFE = 1.4;      // segundos
+let playerFireCooldown = 0;
+
+const playerBullets = []; // {x,y,vx,vy,life,alive,damage}
+
+// ====== MOVIMENTO ======
+let currentSlowFactor = 0;
 
 function handleInput(dt) {
   let vx = 0, vy = 0;
@@ -102,20 +132,20 @@ function initGame() {
     spawnBlock("purple", MAP_W, MAP_H, SAFE_ZONES);
   }
 
-  // alguns inimigos iniciais
+  // inimigos
   for (let i = 0; i < 8; i++) spawnEnemy(MAP_W, MAP_H, SAFE_ZONES);
   for (let i = 0; i < 4; i++) spawnShooter(MAP_W, MAP_H, SAFE_ZONES);
 
   centerCameraOnPlayer();
 }
+
 function centerCameraOnPlayer() {
   cam.x = clamp(player.x - viewW / 2, 0, Math.max(0, MAP_W - viewW));
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
 }
 
-// ====== COLISÕES / COMBATE (BLOCOS) ======
+// ====== COLISÕES COM BLOCOS ======
 let score = 0;
-let currentSlowFactor = 0;
 
 function updateCollisionsBlocks(dt) {
   currentSlowFactor = 0;
@@ -143,7 +173,8 @@ function updateCollisionsBlocks(dt) {
       const dmgTick = t.dmg * (1 - def) * dt * 10;
       player.hp -= dmgTick;
 
-      b.hp -= Math.max(1, player.dmg) * dt;
+      // DANO CORPO-A-CORPO do player EM BLOCO (agora usa player.bodyDmg)
+      b.hp -= Math.max(1, player.bodyDmg) * dt;
 
       if (b.hp <= 0 && b.alive) {
         b.alive = false;
@@ -156,8 +187,128 @@ function updateCollisionsBlocks(dt) {
   }
 }
 
+// ====== TIROS DO PLAYER ======
+function tryShoot(dt) {
+  updateMouseWorld();
+  playerFireCooldown -= dt;
+
+  if (!player.alive) return;
+
+  // atira só quando mouse.shooting estiver true
+  if (mouse.shooting && playerFireCooldown <= 0) {
+    playerFireCooldown = 1 / PLAYER_FIRE_RATE;
+
+    const dx = mouse.worldX - player.x;
+    const dy = mouse.worldY - player.y;
+    const d  = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+
+    const speed = PLAYER_BULLET_SPEED;
+    const damage = Math.max(1, player.dmg); // “Dano” afeta TIRO
+
+    playerBullets.push({
+      x: player.x + ux * (player.radius + 6),
+      y: player.y + uy * (player.radius + 6),
+      vx: ux * speed,
+      vy: uy * speed,
+      life: PLAYER_BULLET_LIFE,
+      alive: true,
+      damage
+    });
+  }
+}
+
+function updatePlayerBullets(dt) {
+  for (const b of playerBullets) {
+    if (!b.alive) continue;
+    b.x += b.vx * 60 * dt;
+    b.y += b.vy * 60 * dt;
+    b.life -= dt;
+    if (b.life <= 0) { b.alive = false; continue; }
+
+    // colisão com inimigos
+    let hit = false;
+
+    // normais
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const dist = Math.hypot(b.x - e.x, b.y - e.y);
+      if (dist < ENEMY_SIZE/2 + 6) {
+        e.hp -= b.damage;
+        hit = true;
+        if (e.hp <= 0) {
+          e.alive = false;
+          addXP(getPlayerBonusXP(ENEMY_XP_KILL));
+          score += ENEMY_SCORE;
+        }
+        break;
+      }
+    }
+    if (hit) { b.alive = false; continue; }
+
+    // atiradores
+    for (const s of shooterEnemies) {
+      if (!s.alive) continue;
+      const dist = Math.hypot(b.x - s.x, b.y - s.y);
+      if (dist < SHOOTER_SIZE/2 + 6) {
+        s.hp -= b.damage;
+        hit = true;
+        if (s.hp <= 0) {
+          s.alive = false;
+          addXP(getPlayerBonusXP(SHOOTER_XP_KILL));
+          score += SHOOTER_SCORE;
+        }
+        break;
+      }
+    }
+    if (hit) { b.alive = false; continue; }
+
+    // boss
+    if (boss && boss.alive) {
+      const dist = Math.hypot(b.x - boss.x, b.y - boss.y);
+      if (dist < BOSS_SIZE/2 + 8) {
+        const reduce = boss.dmgReduce || 0;
+        const dmg = b.damage * (1 - reduce);
+        boss.hp -= dmg;
+        b.alive = false;
+        if (boss.hp <= 0) {
+          boss.alive = false;
+          addXP(getPlayerBonusXP(BOSS_XP_KILL));
+          score += BOSS_SCORE;
+          flashEvent("🏆 Boss derrotado!");
+        }
+        continue;
+      }
+    }
+
+    // colisão com blocos
+    for (const k of blocks) {
+      if (!k.alive) continue;
+      // aproximação AABB rápida
+      const half = (BLOCK_TYPES[k.type]?.size || 32) / 2;
+      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) {
+        k.hp -= b.damage;
+        b.alive = false;
+        if (k.hp <= 0) {
+          k.alive = false;
+          const baseXP = BLOCK_TYPES[k.type]?.xp || 0;
+          const gained = getPlayerBonusXP(baseXP);
+          addXP(gained);
+          score += Math.floor(baseXP);
+        }
+        break;
+      }
+    }
+  }
+}
+
 // ====== INIMIGOS ======
-let enemyRespawnTimer   = ENEMY_RESPAWN_MS * 0.5;   // começa mais cedo
+// raios de detecção
+const DETECT_RADIUS_ENEMY   = 650;
+const DETECT_RADIUS_SHOOTER = 800;
+const DETECT_RADIUS_BOSS    = 1000;
+
+let enemyRespawnTimer   = ENEMY_RESPAWN_MS * 0.5;
 let shooterRespawnTimer = SHOOTER_RESPAWN_MS * 0.5;
 
 function moveTowards(obj, tx, ty, speed, dt) {
@@ -174,11 +325,9 @@ function keepDistance(obj, tx, ty, desired, speed, dt) {
   const dy = ty - obj.y;
   const d = Math.hypot(dx, dy) || 1;
   if (d < desired) {
-    // afasta
     obj.x -= (dx / d) * speed * 60 * dt;
     obj.y -= (dy / d) * speed * 60 * dt;
   } else if (d > desired * 1.2) {
-    // aproxima um pouco
     obj.x += (dx / d) * speed * 60 * dt;
     obj.y += (dy / d) * speed * 60 * dt;
   }
@@ -190,60 +339,76 @@ function fireShooter(sh) {
   const d  = Math.hypot(dx, dy) || 1;
   const vx = (dx / d) * SHOOTER_BULLET_SPEED;
   const vy = (dy / d) * SHOOTER_BULLET_SPEED;
-  shooterBullets.push({ x: sh.x, y: sh.y, vx, vy, alive: true, life: 2.8 }); // 2.8s de vida
+  shooterBullets.push({ x: sh.x, y: sh.y, vx, vy, alive: true, life: 2.8 });
+}
+
+function canDetect(distance, radius, playerInSafe) {
+  // não detecta se player está em safe zone
+  if (playerInSafe) return false;
+  return distance <= radius;
 }
 
 function updateEnemies(dt) {
-  // normais: perseguem e causam dano por contato
+  const playerInSafe = isInSafeZone(player.x, player.y, SAFE_ZONES, player.radius);
+
+  // normais
   for (const e of enemies) {
     if (!e.alive) continue;
-    moveTowards(e, player.x, player.y, ENEMY_SPEED, dt);
-
-    // contato
-    const rSum = player.radius + ENEMY_SIZE/2;
     const dist = Math.hypot(e.x - player.x, e.y - player.y);
-    if (dist < rSum) {
-      const def = getPlayerDefPercent();
-      player.hp -= ENEMY_DPS_CONTACT * (1 - def) * dt;
 
-      // player causa dano por contato
-      e.hp -= Math.max(1, player.dmg) * dt;
-      if (e.hp <= 0) {
-        e.alive = false;
-        addXP(getPlayerBonusXP(ENEMY_XP_KILL));
-        score += ENEMY_SCORE;
+    if (canDetect(dist, DETECT_RADIUS_ENEMY, playerInSafe)) {
+      moveTowards(e, player.x, player.y, ENEMY_SPEED, dt);
+
+      // contato
+      const rSum = player.radius + ENEMY_SIZE/2;
+      if (dist < rSum) {
+        const def = getPlayerDefPercent();
+        player.hp -= ENEMY_DPS_CONTACT * (1 - def) * dt;
+
+        // DANO CORPO-A-CORPO do player EM INIMIGO
+        e.hp -= Math.max(1, player.bodyDmg) * dt;
+        if (e.hp <= 0) {
+          e.alive = false;
+          addXP(getPlayerBonusXP(ENEMY_XP_KILL));
+          score += ENEMY_SCORE;
+        }
       }
     }
   }
 
-  // atiradores: mantêm distância e disparam
+  // atiradores
   for (const s of shooterEnemies) {
     if (!s.alive) continue;
-    keepDistance(s, player.x, player.y, 280, SHOOTER_SPEED, dt);
-
-    // contato também machuca (menos)
-    const rSum = player.radius + SHOOTER_SIZE/2;
     const dist = Math.hypot(s.x - player.x, s.y - player.y);
-    if (dist < rSum) {
-      const def = getPlayerDefPercent();
-      player.hp -= SHOOTER_DPS_CONTACT * (1 - def) * dt;
-      s.hp -= Math.max(1, player.dmg) * dt;
-      if (s.hp <= 0) {
-        s.alive = false;
-        addXP(getPlayerBonusXP(SHOOTER_XP_KILL));
-        score += SHOOTER_SCORE;
-      }
-    }
 
-    // tiros
-    s.fireTimer -= dt * SHOOTER_FIRE_RATE;
-    if (s.fireTimer <= 0) {
-      s.fireTimer += 1;
-      fireShooter(s);
+    if (canDetect(dist, DETECT_RADIUS_SHOOTER, playerInSafe)) {
+      keepDistance(s, player.x, player.y, 280, SHOOTER_SPEED, dt);
+
+      // contato
+      const rSum = player.radius + SHOOTER_SIZE/2;
+      if (dist < rSum) {
+        const def = getPlayerDefPercent();
+        player.hp -= SHOOTER_DPS_CONTACT * (1 - def) * dt;
+
+        // corpo-a-corpo do player no inimigo
+        s.hp -= Math.max(1, player.bodyDmg) * dt;
+        if (s.hp <= 0) {
+          s.alive = false;
+          addXP(getPlayerBonusXP(SHOOTER_XP_KILL));
+          score += SHOOTER_SCORE;
+        }
+      }
+
+      // tiros do atirador
+      s.fireTimer -= dt * SHOOTER_FIRE_RATE;
+      if (s.fireTimer <= 0) {
+        s.fireTimer += 1;
+        fireShooter(s);
+      }
     }
   }
 
-  // projéteis
+  // projéteis dos atiradores
   for (const b of shooterBullets) {
     if (!b.alive) continue;
     b.x += b.vx * 60 * dt;
@@ -251,7 +416,6 @@ function updateEnemies(dt) {
     b.life -= dt;
     if (b.life <= 0) { b.alive = false; continue; }
 
-    // colisão com player
     const dist = Math.hypot(b.x - player.x, b.y - player.y);
     if (dist < player.radius + 6) {
       const def = getPlayerDefPercent();
@@ -260,23 +424,24 @@ function updateEnemies(dt) {
     }
   }
 
-  // boss (spawna quando pontuação atingir limiar e ainda não existe)
+  // boss
   if (!boss && score >= 500) {
     spawnBoss(MAP_W, MAP_H, SAFE_ZONES);
     flashEvent("⚠️ Boss apareceu!");
   }
 
   if (boss && boss.alive) {
-    moveTowards(boss, player.x, player.y, BOSS_SPEED, dt);
-
-    // contato
-    const rSum = player.radius + BOSS_SIZE/2;
     const dist = Math.hypot(boss.x - player.x, boss.y - player.y);
-    if (dist < rSum) {
-      const def = getPlayerDefPercent();
-      player.hp -= BOSS_DPS_CONTACT * (1 - def) * dt;
-      const dmgToBoss = Math.max(1, player.dmg) * (1 - (boss.dmgReduce || 0));
-      boss.hp -= dmgToBoss * dt;
+    if (canDetect(dist, DETECT_RADIUS_BOSS, playerInSafe)) {
+      moveTowards(boss, player.x, player.y, BOSS_SPEED, dt);
+
+      const rSum = player.radius + BOSS_SIZE/2;
+      if (dist < rSum) {
+        const def = getPlayerDefPercent();
+        player.hp -= BOSS_DPS_CONTACT * (1 - def) * dt;
+        const dmgToBoss = Math.max(1, player.bodyDmg) * (1 - (boss.dmgReduce || 0));
+        boss.hp -= dmgToBoss * dt;
+      }
     }
 
     if (boss.hp <= 0) {
@@ -287,10 +452,9 @@ function updateEnemies(dt) {
     }
   }
 
-  // respawn timers simples
-  enemyRespawnTimer -= dt * 1000;
+  // respawn
+  enemyRespawnTimer   -= dt * 1000;
   shooterRespawnTimer -= dt * 1000;
-
   if (enemyRespawnTimer <= 0) {
     enemyRespawnTimer = ENEMY_RESPAWN_MS;
     for (let i = 0; i < 4; i++) spawnEnemy(MAP_W, MAP_H, SAFE_ZONES);
@@ -352,7 +516,8 @@ function renderSkills() {
     <h3>Habilidades</h3>
     <p>Pontos: <b>${player.points}</b></p>
     <div class="skills-grid">
-      ${renderSkillRow("dmg",   "Dano")}
+      ${renderSkillRow("dmg",   "Dano (Tiros)")}
+      ${renderSkillRow("body",  "Body Damage (Corpo)")}
       ${renderSkillRow("def",   "Defesa")}
       ${renderSkillRow("hp",    "Vida")}
       ${renderSkillRow("regen", "Regeneração")}
@@ -362,7 +527,7 @@ function renderSkills() {
     <button id="closeSkills" class="skill-btn">Fechar</button>
   `;
   document.getElementById("closeSkills")?.addEventListener("click", () => toggleSkills(false));
-  for (const k of ["dmg","def","hp","regen","speed","mob"]) {
+  for (const k of ["dmg","body","def","hp","regen","speed","mob"]) {
     document.getElementById(`up_${k}`)?.addEventListener("click", () => upgradeSkill(k));
   }
 }
@@ -376,7 +541,7 @@ function renderSkillRow(key, label) {
 }
 function upgradeSkill(key) {
   if (player.points <= 0) return;
-  if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0 };
+  if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
   player.skill[key] = (player.skill[key] || 0) + 1;
   player.points -= 1;
   playerBaseStats(BASES);
@@ -504,7 +669,6 @@ function drawEnemies() {
 
     const pct = Math.max(0, Math.min(1, boss.hp / BOSS_SPAWN_HP));
     drawHPBar(sx, sy - BOSS_SIZE/2, 160, 10, pct);
-    // anel indicando redução de dano
     ctx.strokeStyle = "rgba(255,255,0,0.5)";
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -514,6 +678,7 @@ function drawEnemies() {
 }
 
 function drawBullets() {
+  // balas dos inimigos (brancas)
   ctx.fillStyle = "#ffffff";
   for (const b of shooterBullets) {
     if (!b.alive) continue;
@@ -521,6 +686,17 @@ function drawBullets() {
     const sy = Math.floor(b.y - cam.y);
     ctx.beginPath();
     ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // balas do player (ciano)
+  ctx.fillStyle = "#7ee7ff";
+  for (const p of playerBullets) {
+    if (!p.alive) continue;
+    const sx = Math.floor(p.x - cam.x);
+    const sy = Math.floor(p.y - cam.y);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -552,7 +728,7 @@ function draw() {
   ctx.fillRect(0, 0, viewW, viewH);
 
   drawGrid();
-  drawSafeZones();     // <-- visuais das Safe Zones
+  drawSafeZones();
   drawBlocks();
   drawEnemies();
   drawBullets();
@@ -569,6 +745,8 @@ function update() {
   if (player.alive) handleInput(dt);
   updateCollisionsBlocks(dt);
   updateEnemies(dt);
+  tryShoot(dt);
+  updatePlayerBullets(dt);
 
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
@@ -594,7 +772,7 @@ window.addEventListener("resize", () => {
   MAP_H = viewH * 3;
   // recomputa safe zones no novo mapa
   SAFE_ZONES.length = 0;
-  for (const z of getSafeZones()) SAFE_ZONES.push(z);
+  for (const z of makeSafeZones()) SAFE_ZONES.push(z);
   centerCameraOnPlayer();
 });
 

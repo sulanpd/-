@@ -5,11 +5,14 @@ export const player = {
   radius: 28,
   color: "#4ccfff",
   hp: 100, maxHp: 100,
-  dmg: 25, speed: 3.2,
+  dmg: 25,            // dano dos TIROS
+  bodyDmg: 20,        // dano CORPO-A-CORPO (novo)
+  speed: 3.2,
   def: 0, mob: 1.0,
   xp: 0, level: 1, xpToNext: 60,
   points: 0,
-  skill: { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0 },
+  // adiciona "body" como novo stat
+  skill: { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0, body: 0 },
   alive: true, respawnTimer: 0,
   contactBlocks: {},
   hasDmgReduction: false,
@@ -48,7 +51,13 @@ export function getPlayerDefPercent() {
 }
 
 export function getPlayerDmgMultiplier() {
+  // multiplicador do DANO dos TIROS (mantido)
   return 1 + (player.skill.dmg * 0.001);
+}
+
+export function getPlayerBodyMultiplier() {
+  // multiplicador do DANO corpo-a-corpo (novo) — ~8% por ponto
+  return 1 + (player.skill.body * 0.08);
 }
 
 export function getPlayerBonusDmg() {
@@ -68,8 +77,14 @@ export function getPlayerBonusXP(amt) {
 export function playerBaseStats(BASES) {
   let buffHp  = 1 + (Math.floor(player.level / 10) * 0.015);
   let buffDmg = 1 + (Math.floor(player.level / 10) * 0.01);
+
   player.maxHp = Math.floor(BASES.BASE_HP * buffHp + player.skill.hp * 25);
+  // Dano dos TIROS
   player.dmg   = Math.floor(BASES.BASE_DMG * buffDmg * getPlayerDmgMultiplier() * getPlayerBonusDmg());
+  // Dano CORPO-A-CORPO
+  const baseBody = BASES.BASE_BODY ?? 20;
+  player.bodyDmg = Math.floor(baseBody * getPlayerBodyMultiplier());
+
   player.def   = BASES.BASE_DEF + Math.floor(player.skill.def / 3);
   player.speed = BASES.BASE_SPEED + player.skill.speed * 0.14;
   player.mob   = BASES.BASE_MOB + Math.min(0.5, player.skill.mob * 0.02);
