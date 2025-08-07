@@ -60,6 +60,14 @@ canvas.addEventListener("mousemove", e => {
 const SAFE_ZONES = getSafeZones();
 resetPlayer(SAFE_ZONES);
 playerBaseStats(BASES);
+for (let i = 0; i < 25; i++) {
+    spawnBlock(0, MAP_W, MAP_H, getSafeZones());
+    spawnBlock(1, MAP_W, MAP_H, getSafeZones());
+    spawnBlock(2, MAP_W, MAP_H, getSafeZones());
+}
+for (let i = 0; i < 15; i++) {
+    spawnEnemy(MAP_W, MAP_H, getSafeZones());
+}
 
 // Centraliza a câmera ao inicializar o player
 cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
