@@ -83,6 +83,8 @@ for (let i = 0; i < 15; i++) spawnEnemy(MAP_W, MAP_H, SAFE_ZONES);
 
 // ===== INICIALIZA O PLAYER NO CENTRO DA SAFE =====
 resetPlayer(SAFE_ZONES);
+cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
+cam.y = clamp(player.y - viewH / 2, 0, MAP_H - viewH);
 playerBaseStats(BASES);
 
 // ====== MENSAGENS DE EVENTO ======
@@ -260,10 +262,10 @@ function update() {
             }
             shooterBullets.length = 0; // Limpa tiros perdidos
             // Centraliza câmera imediatamente no player:
-        cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
-        cam.y = clamp(player.y - viewH / 2, 0, MAP_H - viewH);
+            cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
+            cam.y = clamp(player.y - viewH / 2, 0, MAP_H - viewH);
         }
-        
+
         return;
     }
 
@@ -428,6 +430,11 @@ function update() {
                 enemy.alive = true;
             }, ENEMY_RESPAWN_MS);
         }
+    }
+    // --- Verifica morte do player ---
+    if (player.hp <= 0 && player.alive) {
+        player.alive = false;
+        player.respawnTimer = 2.5;
     }
 
     // --- resto igual ao bloco anterior (shooters, boss, conquistas, etc) ---
