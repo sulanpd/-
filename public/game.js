@@ -259,10 +259,10 @@ function update() {
                 showConquestMsg('Conquista: "Nunca Desistir"! Alcance do tiro DOBRADO, +10 pontos!');
             }
             shooterBullets.length = 0; // Limpa tiros perdidos
-        }
-        // Centraliza câmera imediatamente no player:
+            // Centraliza câmera imediatamente no player:
         cam.x = clamp(player.x - viewW / 2, 0, MAP_W - viewW);
         cam.y = clamp(player.y - viewH / 2, 0, MAP_H - viewH);
+        }
         
         return;
     }
