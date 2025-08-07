@@ -18,9 +18,17 @@ export const BASES = {
 // ======= CANVAS E ELEMENTOS DE UI =======
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const viewW = window.innerWidth, viewH = window.innerHeight;
+let viewW = window.innerWidth, viewH = window.innerHeight;
 canvas.width = viewW;
 canvas.height = viewH;
+
+window.addEventListener('resize', () => {
+    viewW = window.innerWidth;
+    viewH = window.innerHeight;
+    canvas.width = viewW;
+    canvas.height = viewH;
+});
+
 
 // Dimensões do mapa (ajuste conforme seu gosto)
 export const MAP_W = viewW * 3;
@@ -232,9 +240,14 @@ function updateHUD() {
 // game.js — Bloco 4
 
 function update() {
+    viewW = window.innerWidth;
+    viewH = window.innerHeight;
+    canvas.width = viewW;
+    canvas.height = viewH;
+
     // --- Respawn automático após morte ---
     if (!player.alive) {
-        player.respawnTimer -= 1/60;
+        player.respawnTimer -= 1 / 60;
         if (player.respawnTimer <= 0) {
             // Respawn do player em uma das safe zones
             const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
@@ -261,13 +274,13 @@ function update() {
     for (let block of blocks) {
         if (!block.alive) continue;
         let t = BLOCK_TYPES[block.type];
-        let closestX = Math.max(block.x - t.size/2, Math.min(player.x, block.x + t.size/2));
-        let closestY = Math.max(block.y - t.size/2, Math.min(player.y, block.y + t.size/2));
+        let closestX = Math.max(block.x - t.size / 2, Math.min(player.x, block.x + t.size / 2));
+        let closestY = Math.max(block.y - t.size / 2, Math.min(player.y, block.y + t.size / 2));
         let dist = Math.hypot(player.x - closestX, player.y - closestY);
         if (dist < player.radius + 1) {
             if (t.slow < blockSlowest) blockSlowest = t.slow;
             if (!player.contactBlocks[block.id]) player.contactBlocks[block.id] = 0;
-            player.contactBlocks[block.id] += 1/60;
+            player.contactBlocks[block.id] += 1 / 60;
             if (player.contactBlocks[block.id] >= 0.25) {
                 player.contactBlocks[block.id] = 0;
                 let blockDmg = t.dmg * (1 - getPlayerDefPercent());
@@ -281,7 +294,7 @@ function update() {
         if (block.hp <= 0 && block.alive) {
             block.alive = false;
             addXP(getPlayerBonusXP(t.xp));
-            setTimeout(()=> spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
+            setTimeout(() => spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
         }
     }
 
@@ -291,8 +304,8 @@ function update() {
     if (keys['a']) player.x -= speed * mob;
     if (keys['d']) player.x += speed * mob;
 
-    player.x = clamp(player.x, player.radius, MAP_W-player.radius);
-    player.y = clamp(player.y, player.radius, MAP_H-player.radius);
+    player.x = clamp(player.x, player.radius, MAP_W - player.radius);
+    player.y = clamp(player.y, player.radius, MAP_H - player.radius);
     player.angle = Math.atan2(mouseY - (player.y - cam.y), mouseX - (player.x - cam.x));
 
     // ---- REGEN ----
@@ -308,8 +321,8 @@ function update() {
         b.y += b.dy;
         b.life--;
     }
-    for (let i = bullets.length-1; i >=0; i--) {
-        if (bullets[i].life <=0) bullets.splice(i,1);
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        if (bullets[i].life <= 0) bullets.splice(i, 1);
     }
 
     // ---- DANO DE TIROS NOS BLOCOS ----
@@ -318,10 +331,10 @@ function update() {
         let t = BLOCK_TYPES[block.type];
         for (let b of bullets) {
             if (
-                b.x > block.x - t.size/2 &&
-                b.x < block.x + t.size/2 &&
-                b.y > block.y - t.size/2 &&
-                b.y < block.y + t.size/2
+                b.x > block.x - t.size / 2 &&
+                b.x < block.x + t.size / 2 &&
+                b.y > block.y - t.size / 2 &&
+                b.y < block.y + t.size / 2
             ) {
                 block.hp -= b.dmg;
                 b.life = 0;
@@ -330,45 +343,45 @@ function update() {
         if (block.hp <= 0 && block.alive) {
             block.alive = false;
             addXP(getPlayerBonusXP(t.xp));
-            setTimeout(()=> spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
+            setTimeout(() => spawnBlock(block.type, MAP_W, MAP_H, SAFE_ZONES), 1800);
         }
     }
 
     // ---- INIMIGOS NORMAIS ----
     for (let enemy of enemies) {
         if (!enemy.alive) continue;
-        let inSafe = isInSafeZone(enemy.x, enemy.y, SAFE_ZONES, ENEMY_SIZE/2+6);
+        let inSafe = isInSafeZone(enemy.x, enemy.y, SAFE_ZONES, ENEMY_SIZE / 2 + 6);
         let dx = player.x - enemy.x, dy = player.y - enemy.y;
-        let dist = Math.hypot(dx,dy);
+        let dist = Math.hypot(dx, dy);
 
         if (!inSafe) {
-            let espeed = 1.7 + Math.random()*0.6;
+            let espeed = 1.7 + Math.random() * 0.6;
             if (dist < 300) {
-                enemy.x += dx/dist*espeed*0.77 + (Math.random()-0.5)*0.7;
-                enemy.y += dy/dist*espeed*0.77 + (Math.random()-0.5)*0.7;
+                enemy.x += dx / dist * espeed * 0.77 + (Math.random() - 0.5) * 0.7;
+                enemy.y += dy / dist * espeed * 0.77 + (Math.random() - 0.5) * 0.7;
             } else {
-                enemy.x += (Math.random()-0.5)*1.2;
-                enemy.y += (Math.random()-0.5)*1.2;
+                enemy.x += (Math.random() - 0.5) * 1.2;
+                enemy.y += (Math.random() - 0.5) * 1.2;
             }
-            enemy.x = clamp(enemy.x, ENEMY_SIZE/2, MAP_W-ENEMY_SIZE/2);
-            enemy.y = clamp(enemy.y, ENEMY_SIZE/2, MAP_H-ENEMY_SIZE/2);
+            enemy.x = clamp(enemy.x, ENEMY_SIZE / 2, MAP_W - ENEMY_SIZE / 2);
+            enemy.y = clamp(enemy.y, ENEMY_SIZE / 2, MAP_H - ENEMY_SIZE / 2);
             for (const zone of SAFE_ZONES) {
-                let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
-                if (dz < zone.r + ENEMY_SIZE/2) {
-                    let ang = Math.atan2(enemy.y-zone.y, enemy.x-zone.x);
-                    let newDist = zone.r + ENEMY_SIZE/2 + 5;
-                    enemy.x = zone.x + Math.cos(ang)*newDist;
-                    enemy.y = zone.y + Math.sin(ang)*newDist;
+                let dz = Math.hypot(enemy.x - zone.x, enemy.y - zone.y);
+                if (dz < zone.r + ENEMY_SIZE / 2) {
+                    let ang = Math.atan2(enemy.y - zone.y, enemy.x - zone.x);
+                    let newDist = zone.r + ENEMY_SIZE / 2 + 5;
+                    enemy.x = zone.x + Math.cos(ang) * newDist;
+                    enemy.y = zone.y + Math.sin(ang) * newDist;
                 }
             }
         } else {
             for (const zone of SAFE_ZONES) {
-                let dz = Math.hypot(enemy.x-zone.x, enemy.y-zone.y);
-                if (dz < zone.r + ENEMY_SIZE/2) {
-                    let ang = Math.atan2(enemy.y-zone.y, enemy.x-zone.x);
-                    let newDist = zone.r + ENEMY_SIZE/2 + 5;
-                    enemy.x = zone.x + Math.cos(ang)*newDist;
-                    enemy.y = zone.y + Math.sin(ang)*newDist;
+                let dz = Math.hypot(enemy.x - zone.x, enemy.y - zone.y);
+                if (dz < zone.r + ENEMY_SIZE / 2) {
+                    let ang = Math.atan2(enemy.y - zone.y, enemy.x - zone.x);
+                    let newDist = zone.r + ENEMY_SIZE / 2 + 5;
+                    enemy.x = zone.x + Math.cos(ang) * newDist;
+                    enemy.y = zone.y + Math.sin(ang) * newDist;
                 }
             }
         }
@@ -376,10 +389,10 @@ function update() {
         // DANO POR TIRO
         for (let b of bullets) {
             if (
-                b.x > enemy.x - ENEMY_SIZE/2 &&
-                b.x < enemy.x + ENEMY_SIZE/2 &&
-                b.y > enemy.y - ENEMY_SIZE/2 &&
-                b.y < enemy.y + ENEMY_SIZE/2
+                b.x > enemy.x - ENEMY_SIZE / 2 &&
+                b.x < enemy.x + ENEMY_SIZE / 2 &&
+                b.y > enemy.y - ENEMY_SIZE / 2 &&
+                b.y < enemy.y + ENEMY_SIZE / 2
             ) {
                 let dmgFinal = b.dmg * (1 - getPlayerDefPercent());
                 enemy.hp -= dmgFinal;
@@ -388,8 +401,8 @@ function update() {
         }
 
         // DANO POR ENCOSTAR NO PLAYER
-        let dplayer = Math.hypot(enemy.x-player.x, enemy.y-player.y);
-        if (dplayer < ENEMY_SIZE/2 + player.radius-3 && player.hp > 0) {
+        let dplayer = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+        if (dplayer < ENEMY_SIZE / 2 + player.radius - 3 && player.hp > 0) {
             let inSafeZone = isInSafeZone(player.x, player.y, SAFE_ZONES, player.radius);
             let dmgToPlayer = 14 * 0.5;
             dmgToPlayer = dmgToPlayer * (1 - getPlayerDefPercent());
@@ -399,15 +412,15 @@ function update() {
         // MORTE DO INIMIGO
         if (enemy.hp <= 0 && enemy.alive) {
             enemy.alive = false;
-            addXP(getPlayerBonusXP(48 + Math.floor(player.level/2)));
+            addXP(getPlayerBonusXP(48 + Math.floor(player.level / 2)));
             setTimeout(() => {
                 let ex, ey, safe;
                 do {
-                    ex = Math.random() * (MAP_W-200) + 100;
-                    ey = Math.random() * (MAP_H-200) + 100;
-                    safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+ENEMY_SIZE/2+6);
+                    ex = Math.random() * (MAP_W - 200) + 100;
+                    ey = Math.random() * (MAP_H - 200) + 100;
+                    safe = SAFE_ZONES.some(z => Math.hypot(ex - z.x, ey - z.y) < z.r + ENEMY_SIZE / 2 + 6);
                 } while (safe);
-                enemy.x = ex; enemy.y = ey; enemy.hp = 60 + Math.random()*65;
+                enemy.x = ex; enemy.y = ey; enemy.hp = 60 + Math.random() * 65;
                 enemy.alive = true;
             }, ENEMY_RESPAWN_MS);
         }
@@ -422,7 +435,7 @@ function update() {
         player.alive = false;
         player.respawnTimer = 2.5;
     }
-    
+
     // --- resto igual ao bloco anterior (shooters, boss, conquistas, etc) ---
     // (Se quiser o Bloco 4B novamente, é só pedir!)
 }
