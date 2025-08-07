@@ -589,11 +589,6 @@ function update() {
             dmgReduceIcon.style.display = "flex";
         }
     }
-
-    // --- CÂMERA CENTRALIZADA ---
-    cam.x = Math.max(0, Math.min(MAP_W-viewW, player.x - viewW/2));
-    cam.y = Math.max(0, Math.min(MAP_H-viewH, player.y - viewH/2));
-
     // --- MENSAGENS DE EVENTO ---
     if (msgQueue.length > 0) {
         let m = msgQueue[0];
@@ -619,7 +614,9 @@ function draw() {
     ctx.clearRect(0, 0, viewW, viewH);
 
     ctx.save();
-    ctx.translate(-cam.x, -cam.y);
+ctx.translate(-cam.x, -cam.y);
+// ...desenhar tudo...
+ctx.restore();
 
     // Zonas seguras
     for (const zone of SAFE_ZONES) {
