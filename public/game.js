@@ -1,18 +1,28 @@
 // game.js — XP, colisões, skills e HUD (com null-safety no HUD)
 
 import { player, resetPlayer, playerBaseStats, getPlayerDefPercent, getPlayerRegen, getPlayerBonusXP, xpToNext } from "./player.js";
-import { enemies } from "./enemy.js";
+import { enemies } from "./enemy.js"; // pronto pra integrar inimigos depois
 import { blocks, BLOCK_TYPES, spawnBlock } from "./blocks.js";
 import { clamp } from "./utils.js";
 
 // ====== CANVAS / MAPA / CÂMERA ======
 const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const ctx = canvas.getContext("2d", { alpha: false });
 
-let viewW = window.innerWidth;
-let viewH = window.innerHeight;
-canvas.width  = viewW;
-canvas.height = viewH;
+// resolução responsiva (suporte a DPR sem borrado)
+function resizeCanvas() {
+  let viewW = window.innerWidth;
+  let viewH = window.innerHeight;
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  canvas.style.width = viewW + "px";
+  canvas.style.height = viewH + "px";
+  canvas.width = Math.floor(viewW * dpr);
+  canvas.height = Math.floor(viewH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { viewW, viewH };
+}
+
+let { viewW, viewH } = resizeCanvas();
 
 let MAP_W = viewW * 3;
 let MAP_H = viewH * 3;
@@ -58,8 +68,7 @@ function handleInput(dt) {
     vx /= len; vy /= len;
   }
 
-  const slow = currentSlowFactor;
-  const spd = player.speed * (1 - slow) * 60 * dt;
+  const spd = player.speed * (1 - currentSlowFactor) * 60 * dt;
 
   player.x += vx * spd;
   player.y += vy * spd;
@@ -72,6 +81,7 @@ function handleInput(dt) {
 // ====== SPAWN ======
 function initGame() {
   resetPlayer(getSafeZones());
+  // 25 de cada tipo (total 75)
   for (let i = 0; i < 25; i++) {
     spawnBlock("yellow", MAP_W, MAP_H, getSafeZones());
     spawnBlock("blue",   MAP_W, MAP_H, getSafeZones());
@@ -92,6 +102,7 @@ let currentSlowFactor = 0;
 function updateCollisions(dt) {
   currentSlowFactor = 0;
 
+  // regen passiva
   const regenRate = getPlayerRegen();
   if (regenRate > 0 && player.alive) {
     player.hp = Math.min(player.maxHp, player.hp + regenRate * player.maxHp * dt);
@@ -108,12 +119,15 @@ function updateCollisions(dt) {
     const overlap = (t.size/2 + player.radius) - dist;
 
     if (overlap > 0) {
+      // aplica slow do bloco (menor slow -> menos penalidade; usamos 1 - slow como “peso” do efeito)
       currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
 
+      // dano por contato (reduzido pela defesa)
       const def = getPlayerDefPercent();
       const dmgTick = t.dmg * (1 - def) * dt * 10;
       player.hp -= dmgTick;
 
+      // player causa dano ao bloco por contato
       b.hp -= Math.max(1, player.dmg) * dt;
 
       if (b.hp <= 0 && b.alive) {
@@ -162,19 +176,19 @@ function updateRespawn(dt) {
 }
 
 // ====== HUD / SKILLS ======
-const hudHp     = document.getElementById("hp");        // pode não existir no seu HTML
-const hudLvl    = document.getElementById("level");     // pode não existir no seu HTML
-const hudScore  = document.getElementById("score");
-const btnSkills = document.getElementById("openSkills");
-const spanPoints= document.getElementById("points");
-const xpbar     = document.getElementById("xpbar");
-const skillsDiv = document.getElementById("skills");
-const eventMsg  = document.getElementById("eventMsg");
-const deathMsg  = document.getElementById("deathMsg");
+const hudHp      = document.getElementById("hp");
+const hudLvl     = document.getElementById("level");
+const hudScore   = document.getElementById("score");
+const btnSkills  = document.getElementById("openSkills");
+const spanPoints = document.getElementById("points");
+const xpbar      = document.getElementById("xpbar");
+const skillsDiv  = document.getElementById("skills");
+const eventMsg   = document.getElementById("eventMsg");
+const deathMsg   = document.getElementById("deathMsg");
 
 btnSkills?.addEventListener("click", () => toggleSkills());
 
-function toggleSkills(force=false) {
+function toggleSkills(force = false) {
   const show = force === false ? (skillsDiv?.style.display !== "block") : force;
   if (!skillsDiv) return;
   skillsDiv.style.display = show ? "block" : "none";
@@ -194,7 +208,7 @@ function renderSkills() {
       ${renderSkillRow("speed", "Velocidade")}
       ${renderSkillRow("mob",   "Mobilidade")}
     </div>
-    <button id="closeSkills">Fechar</button>
+    <button id="closeSkills" class="skill-btn">Fechar</button>
   `;
   document.getElementById("closeSkills")?.addEventListener("click", () => toggleSkills(false));
   for (const k of ["dmg","def","hp","regen","speed","mob"]) {
@@ -207,7 +221,7 @@ function renderSkillRow(key, label) {
   return `
     <div class="skill-row">
       <span>${label}: <b>${val}</b></span>
-      <button id="up_${key}">+1</button>
+      <button id="up_${key}" class="skill-btn">+1</button>
     </div>`;
 }
 
@@ -222,7 +236,7 @@ function upgradeSkill(key) {
 }
 
 function updateHUD() {
-  if (hudHp)   hudHp.textContent = `${Math.ceil(player.hp)}/${player.maxHp}`;
+  if (hudHp)   hudHp.textContent = `${Math.ceil(Math.max(0, player.hp))}/${player.maxHp}`;
   if (hudLvl)  hudLvl.textContent = player.level;
   if (hudScore)  hudScore.textContent = score;
   if (spanPoints) spanPoints.textContent = player.points;
@@ -241,6 +255,7 @@ function flashEvent(msg) {
 
 function showDeathMsg(show) {
   if (!deathMsg) return;
+  deathMsg.textContent = show ? "Você Morreu!" : "";
   deathMsg.style.display = show ? "block" : "none";
 }
 
@@ -331,10 +346,9 @@ function gameLoop() {
 
 // ====== RESIZE ======
 window.addEventListener("resize", () => {
-  viewW = window.innerWidth;
-  viewH = window.innerHeight;
-  canvas.width  = viewW;
-  canvas.height = viewH;
+  ({ viewW, viewH } = resizeCanvas());
+  MAP_W = viewW * 3;
+  MAP_H = viewH * 3;
   centerCameraOnPlayer();
 });
 

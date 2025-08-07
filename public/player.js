@@ -1,102 +1,81 @@
 // player.js
-
-// Todas as informações e funções do player e da lógica de skills, XP, conquistas, respawn.
-
 export const player = {
-    x: 0, y: 0,
-    angle: 0,
-    radius: 28,
-    color: "#4ccfff",
-    hp: 100,
-    maxHp: 100,
-    dmg: 25,
-    speed: 3.2,
-    def: 0,
-    mob: 1.0,
-    xp: 0,
-    level: 1,
-    xpToNext: 60,
-    points: 0,
-    skill: { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0 },
-    alive: true,
-    respawnTimer: 0,
-    contactBlocks: {},
-    hasDmgReduction: false,
-    conquest: {
-        vontadeFracos: false,
-        nuncaDesistir: false
-    },
-    deathsAfter10: 0,
-    deathsAfter25: 0
+  x: 0, y: 0,
+  angle: 0,
+  radius: 28,
+  color: "#4ccfff",
+  hp: 100, maxHp: 100,
+  dmg: 25, speed: 3.2,
+  def: 0, mob: 1.0,
+  xp: 0, level: 1, xpToNext: 60,
+  points: 0,
+  skill: { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0 },
+  alive: true, respawnTimer: 0,
+  contactBlocks: {},
+  hasDmgReduction: false,
+  conquest: { vontadeFracos: false, nuncaDesistir: false },
+  deathsAfter10: 0,
+  deathsAfter25: 0
 };
 
-// Função para resetar o player (respawn)
 export function resetPlayer(SAFE_ZONES) {
-    const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
-    player.x = zona.x;
-    player.y = zona.y;
-    player.hp = player.maxHp;
-    player.alive = true;
-    player.respawnTimer = 0;
-    player.contactBlocks = {};
+  const zona = SAFE_ZONES[Math.floor(Math.random() * SAFE_ZONES.length)];
+  player.x = zona.x;
+  player.y = zona.y;
+  player.hp = player.maxHp;
+  player.alive = true;
+  player.respawnTimer = 0;
+  player.contactBlocks = {};
 }
 
-// Lógica de regeneração
 export function getPlayerRegen() {
-    const pts = player.skill.regen;
-    if (pts < 1) return 0;
-    let total = 0;
-    for (let i = 1; i <= pts; i++) {
-        if (i <= 3) total += 0.01;
-        else if (i <= 6) total += 0.02;
-        else total += 0.03;
-    }
-    return total;
+  const pts = player.skill.regen;
+  if (pts < 1) return 0;
+  let total = 0;
+  for (let i = 1; i <= pts; i++) {
+    if (i <= 3) total += 0.01;
+    else if (i <= 6) total += 0.02;
+    else total += 0.03;
+  }
+  return total;
 }
 
-// Redução de dano total do player (skills + conquistas + boss)
 export function getPlayerDefPercent() {
-    let percent = Math.min(0.8, (Math.floor(player.skill.def/3) * 0.005));
-    if (player.hasDmgReduction) percent += 0.20;
-    percent += getPlayerBonusDmgReduce();
-    return Math.min(percent, 0.95);
+  let percent = Math.min(0.8, (Math.floor(player.skill.def / 3) * 0.005));
+  if (player.hasDmgReduction) percent += 0.20;
+  percent += getPlayerBonusDmgReduce();
+  return Math.min(percent, 0.95);
 }
 
-// Bônus de dano por skills
 export function getPlayerDmgMultiplier() {
-    return 1 + (player.skill.dmg * 0.001);
+  return 1 + (player.skill.dmg * 0.001);
 }
 
-// Bônus de dano por conquista
 export function getPlayerBonusDmg() {
-    return player.conquest.vontadeFracos ? 1.10 : 1.0;
+  return player.conquest.vontadeFracos ? 1.10 : 1.0;
 }
 
-// Redução de dano adicional por conquista
 export function getPlayerBonusDmgReduce() {
-    let reduce = 0;
-    if (player.conquest.vontadeFracos) reduce += 0.05;
-    return reduce;
+  let reduce = 0;
+  if (player.conquest.vontadeFracos) reduce += 0.05;
+  return reduce;
 }
 
-// Bônus de XP por conquista
 export function getPlayerBonusXP(amt) {
-    return amt * (player.conquest.vontadeFracos ? 1.25 : 1.0);
+  return amt * (player.conquest.vontadeFracos ? 1.25 : 1.0);
 }
 
-// Atualiza todos os status do player conforme skills e buffs
 export function playerBaseStats(BASES) {
-    let buffHp = 1 + (Math.floor(player.level/10) * 0.015);
-    let buffDmg = 1 + (Math.floor(player.level/10) * 0.01);
-    player.maxHp = Math.floor(BASES.BASE_HP * buffHp + player.skill.hp * 25);
-    player.dmg = Math.floor(BASES.BASE_DMG * buffDmg * getPlayerDmgMultiplier() * getPlayerBonusDmg());
-    player.def = BASES.BASE_DEF + Math.floor(player.skill.def/3);
-    player.speed = BASES.BASE_SPEED + player.skill.speed * 0.14;
-    player.mob = BASES.BASE_MOB + Math.min(0.5, player.skill.mob * 0.02);
-    if (player.hp > player.maxHp) player.hp = player.maxHp;
+  let buffHp  = 1 + (Math.floor(player.level / 10) * 0.015);
+  let buffDmg = 1 + (Math.floor(player.level / 10) * 0.01);
+  player.maxHp = Math.floor(BASES.BASE_HP * buffHp + player.skill.hp * 25);
+  player.dmg   = Math.floor(BASES.BASE_DMG * buffDmg * getPlayerDmgMultiplier() * getPlayerBonusDmg());
+  player.def   = BASES.BASE_DEF + Math.floor(player.skill.def / 3);
+  player.speed = BASES.BASE_SPEED + player.skill.speed * 0.14;
+  player.mob   = BASES.BASE_MOB + Math.min(0.5, player.skill.mob * 0.02);
+  if (player.hp > player.maxHp) player.hp = player.maxHp;
 }
 
-// XP para o próximo nível
 export function xpToNext(level) {
-    return Math.floor(60 + 12*Math.pow(level, 1.22));
+  return Math.floor(60 + 12 * Math.pow(level, 1.22));
 }
