@@ -1,13 +1,24 @@
 // enemy.js
+
+// Dados e funções de inimigos, atiradores e boss.
+
+export const ENEMY_SIZE = 38;
+export const SHOOTER_SIZE = 38;
+export const BOSS_SIZE = 78;
+
 export let enemies = [];
 export let shooterEnemies = [];
 export let shooterBullets = [];
 export let boss = null;
-export const ENEMY_SIZE = 38;
-export const SHOOTER_SIZE = 38;
-export const BOSS_SIZE = 78;
-export const ENEMY_RESPAWN_MS = 120000;
-export const SHOOTER_RESPAWN_MS = 100000;
+
+export const ENEMY_RESPAWN_MS = 120_000;
+export const SHOOTER_RESPAWN_MS = 100_000;
+export const SHOOTER_FIRE_RATE = 3.0;
+export const SHOOTER_DMG = 25;
+export const SHOOTER_BULLET_SPEED = 9;
+export const BOSS_SPAWN_HP = 6000;
+export const BOSS_DMG = 120;
+export const BOSS_HIT_RATE = 4.0;
 
 export function spawnEnemy(MAP_W, MAP_H, SAFE_ZONES) {
     let ex, ey, safe;
@@ -19,6 +30,31 @@ export function spawnEnemy(MAP_W, MAP_H, SAFE_ZONES) {
     enemies.push({x: ex, y: ey, hp: 42+Math.random()*60, alive: true, respawnTime: null, type: "normal"});
 }
 
-// Crie funções semelhantes para shooterEnemies, boss, update e draw
-// (A lógica é idêntica à que já tem, só organize tudo aqui!)
-// Exporte todas as funções que forem necessárias para update/draw dos inimigos.
+export function spawnShooter(MAP_W, MAP_H, SAFE_ZONES) {
+    let ex, ey, safe;
+    do {
+        ex = Math.random() * (MAP_W-180) + 90;
+        ey = Math.random() * (MAP_H-180) + 90;
+        safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+SHOOTER_SIZE/2+18);
+    } while (safe);
+    shooterEnemies.push({
+        x: ex, y: ey, hp: 70+Math.random()*45, alive: true, fireTimer: Math.random()*3, type: "shooter"
+    });
+}
+
+export function spawnBoss(MAP_W, MAP_H, SAFE_ZONES) {
+    let ex, ey, safe;
+    do {
+        ex = Math.random() * (MAP_W-250) + 125;
+        ey = Math.random() * (MAP_H-250) + 125;
+        safe = SAFE_ZONES.some(z => Math.hypot(ex-z.x,ey-z.y) < z.r+BOSS_SIZE/2+28);
+    } while (safe);
+    boss = {
+        x: ex, y: ey, hp: BOSS_SPAWN_HP, alive: true, type: "boss",
+        dmgReduce: 0.20 // 20% de redução de dano tomado
+    };
+}
+
+// (Aqui você pode colocar as funções auxiliares que preferir, como atualização de movimento, checagem de colisão, morte, etc, 
+// mas a maior parte das funções de lógica (update/draw) podem ser organizadas em game.js para integrar todos os módulos.)
+
