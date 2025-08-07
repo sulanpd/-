@@ -1,21 +1,36 @@
 // enemy.js
-export const ENEMY_SIZE = 38;
+export const ENEMY_SIZE   = 38;
 export const SHOOTER_SIZE = 38;
-export const BOSS_SIZE = 78;
+export const BOSS_SIZE    = 78;
 
-export let enemies = [];
-export let shooterEnemies = [];
-export let shooterBullets = [];
-export let boss = null;
+export const ENEMY_SPEED   = 2.0;
+export const SHOOTER_SPEED = 1.6;
+export const BOSS_SPEED    = 1.2;
+
+export const ENEMY_DPS_CONTACT   = 12;  // dano por segundo em contato
+export const SHOOTER_DPS_CONTACT = 8;
+export const BOSS_DPS_CONTACT    = 65;
+
+export const SHOOTER_BULLET_DMG   = 30;
+export const SHOOTER_BULLET_SPEED = 9;
+export const SHOOTER_FIRE_RATE    = 3.0; // tiros / s (1/t = intervalo)
+
+export const ENEMY_XP_KILL   = 20;
+export const SHOOTER_XP_KILL = 35;
+export const BOSS_XP_KILL    = 1200;
+
+export const ENEMY_SCORE   = 15;
+export const SHOOTER_SCORE = 25;
+export const BOSS_SCORE    = 1500;
+
+export let enemies = [];         // {x,y,hp,alive,type:"normal"}
+export let shooterEnemies = [];  // {x,y,hp,alive,fireTimer,type:"shooter"}
+export let shooterBullets = [];  // {x,y,vx,vy,alive,life}
+export let boss = null;          // {x,y,hp,alive,type:"boss",dmgReduce}
 
 export const ENEMY_RESPAWN_MS   = 120_000;
 export const SHOOTER_RESPAWN_MS = 100_000;
-export const SHOOTER_FIRE_RATE  = 3.0;
-export const SHOOTER_DMG        = 25;
-export const SHOOTER_BULLET_SPEED = 9;
-export const BOSS_SPAWN_HP      = 6000;
-export const BOSS_DMG           = 120;
-export const BOSS_HIT_RATE      = 4.0;
+export const BOSS_SPAWN_HP      = 6000; // vida inicial do boss
 
 export function spawnEnemy(MAP_W, MAP_H, SAFE_ZONES) {
   let ex, ey, safe;
@@ -24,7 +39,7 @@ export function spawnEnemy(MAP_W, MAP_H, SAFE_ZONES) {
     ey = Math.random() * (MAP_H - 160) + 80;
     safe = SAFE_ZONES.some(z => Math.hypot(ex - z.x, ey - z.y) < z.r + ENEMY_SIZE / 2 + 8);
   } while (safe);
-  enemies.push({ x: ex, y: ey, hp: 42 + Math.random() * 60, alive: true, respawnTime: null, type: "normal" });
+  enemies.push({ x: ex, y: ey, hp: 100 + Math.random() * 60, alive: true, type: "normal" });
 }
 
 export function spawnShooter(MAP_W, MAP_H, SAFE_ZONES) {
@@ -35,7 +50,7 @@ export function spawnShooter(MAP_W, MAP_H, SAFE_ZONES) {
     safe = SAFE_ZONES.some(z => Math.hypot(ex - z.x, ey - z.y) < z.r + SHOOTER_SIZE / 2 + 18);
   } while (safe);
   shooterEnemies.push({
-    x: ex, y: ey, hp: 70 + Math.random() * 45, alive: true, fireTimer: Math.random() * 3, type: "shooter"
+    x: ex, y: ey, hp: 140 + Math.random() * 70, alive: true, fireTimer: Math.random() * 0.8, type: "shooter"
   });
 }
 
