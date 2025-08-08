@@ -1,112 +1,164 @@
-import { player } from "./player.js";
-import { spawnProjectile } from "./projectiles.js";
+import { player, getPlayerDefPercent } from "./player.js";
 
 export const enemies = [];
+export const shooterBullets = [];  // projéteis dos laranjas
+export const bossProjectiles = []; // projéteis das skills do boss
 
-function randomPosOutsideSafe(mapW, mapH, safeZones, extra = 50) {
-  let pos, inSafe;
-  do {
-    pos = { x: Math.random() * mapW, y: Math.random() * mapH };
-    inSafe = safeZones.some(s => Math.hypot(pos.x - s.x, pos.y - s.y) < s.r + extra);
-  } while (inSafe);
-  return pos;
+const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
+
+function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
+  let p, ok=false;
+  for (let i=0;i<40 && !ok;i++){
+    p = { x: Math.random()*mapW, y: Math.random()*mapH };
+    ok = !safeZones.some(s => Math.hypot(p.x-s.x, p.y-s.y) < s.r + pad);
+  }
+  return p || { x: mapW*0.5, y: mapH*0.5 };
 }
 
 export function spawnEnemy(type, mapW, mapH, safeZones) {
-  const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
-  const enemy = {
-    x: pos.x, y: pos.y,
-    type,
-    radius: type === "boss" ? 50 : 25,
-    color:  type === "boss" ? "#ff0000" : (type === "orange" ? "#ff8000" : "#ff4444"),
-    maxHp:  type === "boss" ? 2000 : (type === "orange" ? 200 : 100),
-    hp:     type === "boss" ? 2000 : (type === "orange" ? 200 : 100),
-    speed:  type === "boss" ? 1.5  : (type === "orange" ? 2.2 : 2.5),
-    dmg:    type === "boss" ? 40   : (type === "orange" ? 15 : 10),
-    alive: true,
-    // Boss state
-    phase: 1,
-    cooldown1: 0,
-    cooldown2: 0,
-    dmgReduction: 0
+  const isBoss = type === "boss";
+  const p = randomPosOutsideSafe(mapW, mapH, safeZones);
+  const e = {
+    x:p.x, y:p.y, type,
+    radius: isBoss ? 60 : 26,
+    color:  isBoss ? "#b1002a" : (type==="orange" ? "#ff9c40" : "#f35555"),
+    maxHp:  isBoss ? 2800 : (type==="orange" ? 210 : 160),
+    hp:     isBoss ? 2800 : (type==="orange" ? 210 : 160),
+    speed:  isBoss ? 1.8  : (type==="orange" ? 2.2 : 2.6),
+    dmg:    isBoss ? 55   : (type==="orange" ? 14 : 10),
+    alive:true,
+    // boss state
+    phase:1, dmgReduce:0, s1cd:0, s2cd:0, lastSkillCd:0
   };
-  enemies.push(enemy);
-  return enemy;
+  enemies.push(e);
+  return e;
 }
 
-export function spawnBoss(mapW, mapH, safeZones) {
-  return spawnEnemy("boss", mapW, mapH, safeZones);
-}
+export function spawnBoss(mapW, mapH, safeZones){ return spawnEnemy("boss", mapW, mapH, safeZones); }
 
 export function updateEnemies(dt, safeZones) {
+  // mover inimigos
   for (const e of enemies) {
     if (!e.alive) continue;
 
-    // Fases do boss
-    if (e.type === "boss") {
-      if (e.hp <= e.maxHp * 0.6 && e.phase < 2) e.phase = 2;
-      if (e.hp <= e.maxHp * 0.4 && e.phase < 3) {
-        e.phase = 3;
-        e.speed *= 1.3;
-        e.dmgReduction = 0.5;
-      }
+    // fases do boss
+    if (e.type==="boss") {
+      if (e.hp <= e.maxHp*0.6 && e.phase < 2) e.phase = 2;
+      if (e.hp <= e.maxHp*0.4 && e.phase < 3) { e.phase = 3; e.dmgReduce = 0.5; e.s1cd = Math.min(e.s1cd, 3); e.speed *= 1.3; }
     }
 
-    // IA: só persegue se player NÃO estiver em safe zone
     const inSafe = safeZones.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.r);
-    const distP = Math.hypot(player.x - e.x, player.y - e.y);
+    const dist = Math.hypot(e.x - player.x, e.y - player.y);
+    const detect = e.type==="boss" ? ENEMY_DETECT.boss : (e.type==="orange" ? ENEMY_DETECT.orange : ENEMY_DETECT.basic);
 
-    if (!inSafe && distP < (e.type === "boss" ? 1000 : (e.type === "orange" ? 800 : 650))) {
-      const d = Math.max(1, distP);
-      e.x += ((player.x - e.x) / d) * e.speed * 60 * dt;
-      e.y += ((player.y - e.y) / d) * e.speed * 60 * dt;
+    if (!inSafe && dist < detect) {
+      const d = Math.max(1, dist);
+      e.x += (player.x - e.x)/d * e.speed * 60 * dt;
+      e.y += (player.y - e.y)/d * e.speed * 60 * dt;
     }
 
-    // Contato (dano simples + body damage do jogador)
-    if (distP < (player.radius || 28) + e.radius) {
-      player.hp -= e.dmg * dt;
-      e.hp -= Math.max(1, player.bodyDmg || 0) * dt;
-      if (e.hp <= 0) e.alive = false;
-    }
-
-    // Skills do boss
-    if (e.type === "boss") {
-      e.cooldown1 -= dt;
-      e.cooldown2 -= dt;
-
-      // respeita intervalo mínimo entre skills: nunca as duas “ao mesmo tempo”
-      const canCastSkill1 = e.cooldown1 <= 0 && distP < 900;
-      const canCastSkill2 = e.phase >= 2 && e.cooldown2 <= 0 && distP < 900;
-
-      if (canCastSkill1 && (!canCastSkill2 || Math.random() < 0.6)) {
-        // Skill 1: projétil que prende 1.5s (trap) — CD 6s (ou 3s na fase 3)
-        spawnProjectile(e.x, e.y, player.x, player.y, 200, 0, "trap");
-        e.cooldown1 = (e.phase >= 3) ? 3 : 6;
-        // trava 1.5s antes da próxima skill
-        e.cooldown2 = Math.max(e.cooldown2, 1.5);
-      } else if (canCastSkill2) {
-        // Skill 2: projétil que cria círculo (HP 250, -50% spd, -25% def) — CD 5s
-        spawnProjectile(e.x, e.y, player.x, player.y, 150, 0, "circle");
-        e.cooldown2 = 5;
-        e.cooldown1 = Math.max(e.cooldown1, 1.5);
+    // laranjas atiram
+    if (e.type==="orange" && !inSafe && dist < 700) {
+      e.shootCd = (e.shootCd || 0) - dt;
+      if (e.shootCd <= 0) {
+        e.shootCd = 1.2;
+        const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+        shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13, vy:(dy/d)*13, life:2.2, alive:true, dmg:16 });
       }
+    }
+
+    // skills do boss
+    if (e.type==="boss" && !inSafe) {
+      e.s1cd -= dt; e.s2cd -= dt; e.lastSkillCd -= dt;
+      if (e.lastSkillCd <= 0) {
+        const wantS1 = e.s1cd <= 0;
+        const wantS2 = e.phase>=2 && e.s2cd <= 0;
+        if (wantS1 && (!wantS2 || Math.random()<0.6)) {
+          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10, vy:(dy/d)*10, life:2.5, alive:true, type:"trap" });
+          e.s1cd = (e.phase>=3) ? 3 : 6;
+          e.lastSkillCd = 1.5;
+        } else if (wantS2) {
+          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8, vy:(dy/d)*8, life:2.8, alive:true, type:"circle" });
+          e.s2cd = 5;
+          e.lastSkillCd = 1.5;
+        }
+      }
+    }
+  }
+
+  // atualizar projéteis dos laranjas (colisão com player)
+  for (const b of shooterBullets) {
+    if (!b.alive) continue;
+    b.x += b.vx * 60 * dt; b.y += b.vy * 60 * dt; b.life -= dt;
+    if (b.life <= 0) { b.alive=false; continue; }
+    const dist = Math.hypot(b.x - player.x, b.y - player.y);
+    if (dist < (player.radius||28) + 6) {
+      const def = getPlayerDefPercent();
+      player.hp -= b.dmg * (1 - def);
+      b.alive = false;
+    }
+  }
+
+  // atualizar projéteis do boss + aplicar efeitos no player
+  for (const p of bossProjectiles) {
+    if (!p.alive) continue;
+    p.x += p.vx * 60 * dt; p.y += p.vy * 60 * dt; p.life -= dt;
+    if (p.life <= 0) { p.alive=false; continue; }
+    const dist = Math.hypot(p.x - player.x, p.y - player.y);
+    const rad = p.type==="circle" ? 14 : 8;
+    if (dist < (player.radius||28) + rad) {
+      if (p.type==="trap") {
+        player.freezeTimer = Math.max(player.freezeTimer, 1.5);
+      } else if (p.type==="circle") {
+        player.defDebuff = Math.max(player.defDebuff, 0.25);
+        player.slowMult = Math.min(player.slowMult, 0.5);
+        // efeito dura 4s
+        player.circleTimer = 4;
+      }
+      p.alive=false;
+    }
+  }
+
+  // timer de círculo ativo no player
+  if (player.circleTimer !== undefined) {
+    player.circleTimer -= dt;
+    if (player.circleTimer <= 0) {
+      player.circleTimer = 0;
+      player.defDebuff = 0;
+      player.slowMult = 1;
     }
   }
 }
 
 export function drawEnemies(ctx, cam) {
+  // inimigos
   for (const e of enemies) {
     if (!e.alive) continue;
+    const sx = Math.floor(e.x - cam.x), sy = Math.floor(e.y - cam.y);
     ctx.fillStyle = e.color;
-    ctx.beginPath();
-    ctx.arc(e.x - cam.x, e.y - cam.y, e.radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
+    // HP bar
+    const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
+    ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 10, w, 6);
+    ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 10, w*pct, 6);
+  }
 
-    const w = e.radius * 2;
-    const hpPct = Math.max(0, e.hp / e.maxHp);
-    ctx.fillStyle = "#000";
-    ctx.fillRect(e.x - cam.x - w/2, e.y - cam.y - e.radius - 10, w, 5);
-    ctx.fillStyle = "#0f0";
-    ctx.fillRect(e.x - cam.x - w/2, e.y - cam.y - e.radius - 10, w * hpPct, 5);
+  // balas laranjas
+  ctx.fillStyle="#ffffff";
+  for (const b of shooterBullets) {
+    if (!b.alive) continue;
+    const sx=Math.floor(b.x-cam.x), sy=Math.floor(b.y-cam.y);
+    ctx.beginPath(); ctx.arc(sx,sy,6,0,Math.PI*2); ctx.fill();
+  }
+
+  // projéteis do boss
+  for (const p of bossProjectiles) {
+    if (!p.alive) continue;
+    const sx=Math.floor(p.x-cam.x), sy=Math.floor(p.y-cam.y);
+    ctx.beginPath();
+    ctx.fillStyle = p.type==="circle" ? "#00e0ff" : "#ff0066";
+    ctx.arc(sx,sy,p.type==="circle"?14:8,0,Math.PI*2); ctx.fill();
   }
 }
