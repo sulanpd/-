@@ -57,7 +57,7 @@ function drawSafeZones() {
 const keys = new Set();
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key === "Escape") toggleSkills(false);
+  if (e.key === "escape") toggleSkills(false);
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 
@@ -95,7 +95,7 @@ function centerCameraOnPlayer() {
 /* ===================== Init ===================== */
 function initGame() {
   resetPlayer(getSafeZones());
-  // spawn de blocos dobrado
+  // spawn inicial de blocos (dobrado)
   for (let i = 0; i < 50; i++) {
     spawnBlock("yellow", MAP_W, MAP_H, getSafeZones());
     spawnBlock("blue",   MAP_W, MAP_H, getSafeZones());
@@ -136,7 +136,7 @@ function showDeathMsg(show) {
   deathMsg.style.display = show ? "block" : "none";
 }
 
-/* ===================== Skills UI (abre/fecha com botão e Esc) ===================== */
+/* ===================== Skills UI (botão + Esc) ===================== */
 const btnSkills = document.getElementById("openSkills");
 const skillsDiv = document.getElementById("skills");
 btnSkills?.addEventListener("click", () => toggleSkills());
@@ -206,9 +206,66 @@ function addXP(v) {
     player.xpToNext = xpToNext(player.level);
     playerBaseStats(BASES);
     if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Posso sentir sua presença"); }
-    if (player.level >= 15) spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
-    if (player.level >= 45 && !enemies.some(e => e.type === "boss")) spawnBoss(MAP_W, MAP_H, getSafeZones());
     flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
+  }
+}
+
+/* ===================== Respawns (Timers + Limites) ===================== */
+const LIMITS = { basic: 12, orange: 6, boss: 1, blocks: 80 };
+const RESPAWN = { basic: 40, orange: 120, boss: 600, block: 2 }; // s
+
+let accBasic = 0, accOrange = 0, accBoss = 0, accBlock = 0;
+
+function updateRespawns(dt) {
+  // Blocos — 1 a cada 2s se < 80
+  accBlock += dt;
+  if (accBlock >= RESPAWN.block) {
+    accBlock -= RESPAWN.block;
+    const aliveBlocks = blocks.filter(b => b.alive).length;
+    if (aliveBlocks < LIMITS.blocks) {
+      const types = ["yellow","blue","purple"];
+      const type = types[(Math.random()*types.length)|0];
+      spawnBlock(type, MAP_W, MAP_H, getSafeZones());
+    }
+  }
+
+  // Básicos — 1 a cada 40s se < 12
+  accBasic += dt;
+  if (accBasic >= RESPAWN.basic) {
+    accBasic -= RESPAWN.basic;
+    const aliveBasics = enemies.filter(e => e.alive && e.type === "basic").length;
+    if (aliveBasics < LIMITS.basic) {
+      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
+    }
+  }
+
+  // Laranjas — 1 a cada 120s se < 6 e lvl >= 15
+  if (player.level >= 15) {
+    accOrange += dt;
+    if (accOrange >= RESPAWN.orange) {
+      accOrange -= RESPAWN.orange;
+      const aliveOranges = enemies.filter(e => e.alive && e.type === "orange").length;
+      if (aliveOranges < LIMITS.orange) {
+        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
+      }
+    }
+  } else {
+    accOrange = 0;
+  }
+
+  // Boss — 1 a cada 10 min, lvl >= 45, 1 vivo no máximo
+  if (player.level >= 45) {
+    accBoss += dt;
+    if (accBoss >= RESPAWN.boss) {
+      accBoss = 0;
+      const aliveBoss = enemies.some(e => e.alive && e.type === "boss");
+      if (!aliveBoss) {
+        spawnBoss(MAP_W, MAP_H, getSafeZones());
+        flashEvent("⚠️ Boss apareceu!");
+      }
+    }
+  } else {
+    accBoss = 0;
   }
 }
 
@@ -366,11 +423,13 @@ function update() {
 
   if (player.alive) handleInput(dt);
 
-  // regen / colisões / projéteis / IA / respawn
   updateCollisions(dt);
   updateEnemies(dt, getSafeZones());
   updatePlayerBullets(dt);
   updateRespawn(dt);
+
+  // timers de respawn com limites
+  updateRespawns(dt);
 
   centerCameraOnPlayer();
   updateHUD();
