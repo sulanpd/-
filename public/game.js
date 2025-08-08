@@ -1,10 +1,11 @@
 /* ========================================================================
  * game.js
- * Loop principal e integração de tudo. (Revisado: sem duplicatas)
+ * Loop principal e integração de tudo. (Revisado: sem duplicatas + Reborn)
  * ===================================================================== */
 import {
   player, resetPlayer, playerBaseStats, getPlayerRegen,
-  getPlayerDefPercent, getPlayerBonusXP, xpToNext, getPlayerMilestoneSummary
+  getPlayerDefPercent, getShieldDefPercent, getPlayerBonusXP, xpToNext, getPlayerMilestoneSummary,
+  doReborn
 } from "./player.js";
 import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies } from "./enemy.js";
 import { blocks, BLOCK_TYPES, spawnBlock, drawBlocks, updateBlocksHitTimers } from "./blocks.js";
@@ -56,7 +57,7 @@ function updateMouseWorld(e){
 }
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key.toLowerCase() === "escape") toggleSkills(false);
+  if (e.key.toLowerCase() === "escape") { toggleSkills(false); toggleReborn(false); }
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
@@ -94,7 +95,11 @@ function centerCameraOnPlayer() {
 /* ---------- Init ---------- */
 function initGame() {
   resetPlayer(getSafeZones());
-  for (let i = 0; i < 50; i++) { spawnBlock("yellow", MAP_W, MAP_H, getSafeZones()); spawnBlock("blue", MAP_W, MAP_H, getSafeZones()); spawnBlock("purple", MAP_W, MAP_H, getSafeZones()); }
+  for (let i = 0; i < 50; i++) {
+    spawnBlock("yellow", MAP_W, MAP_H, getSafeZones());
+    spawnBlock("blue", MAP_W, MAP_H, getSafeZones());
+    spawnBlock("purple", MAP_W, MAP_H, getSafeZones());
+  }
   for (let i = 0; i < 8; i++) spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
   centerCameraOnPlayer();
 }
@@ -107,6 +112,7 @@ const spanPoints = document.getElementById("points");
 const xpbar = document.getElementById("xpbar");
 const eventMsg = document.getElementById("eventMsg");
 const deathMsg = document.getElementById("deathMsg");
+const dmgReduceIcon = document.getElementById("dmgReduceIcon");
 
 function updateHUD() {
   if (hudHp) hudHp.textContent = `${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`;
@@ -114,6 +120,7 @@ function updateHUD() {
   if (hudScore) hudScore.textContent = score;
   if (spanPoints) spanPoints.textContent = player.points;
   if (xpbar) { const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext)); xpbar.style.width = Math.floor(pct * 100) + "%"; }
+  if (dmgReduceIcon) dmgReduceIcon.style.display = (player.milestones.def10 ? "flex" : "none");
 }
 function flashEvent(msg) {
   if (!eventMsg) return;
@@ -142,15 +149,24 @@ function renderSkills() {
     const v = player.skill[k]||0;
     return `<div class="skill-row"><span>${label}: <b>${v}</b></span><button class="up-skill" data-k="${k}" ${player.points<=0?"disabled":""}>+1</button></div>`;
   }).join("");
+
   const ms = getPlayerMilestoneSummary();
   const msLines = [
     `<li>${ms.dmg10 ? "✅" : "❌"} Dano 10+: +20% dano vs blocos</li>`,
     `<li>${ms.def10 ? "✅" : "❌"} Defesa 10+: +20% DR extra</li>`,
     `<li>${ms.spd10 ? "✅" : "❌"} Velocidade 10+: 10% chance de ignorar 1 dano</li>`
   ].join("");
+
+  const rebornLine = player.hasReborn
+    ? `<div style="margin:8px 0 10px 0;padding:8px;border-radius:10px;border:1px solid #556;background:#1b2230;">
+         <b>Árvore Reborn</b>: ${player.rebornClass || "-"} ${player.rebornClass==="DPS"?"• Multiplicador de projétil x1.25": (player.rebornClass==="TANK"?"• DR +25% & Escudo":"")}
+       </div>`
+    : "";
+
   skillsDiv.innerHTML = `
     <div class="skills-wrap">
       <h3>Habilidades</h3>
+      ${rebornLine}
       <p>Pontos disponíveis: <b id="skillPoints">${player.points}</b></p>
       <div class="skills-grid">${rows}</div>
       <div class="skills-milestones" style="margin-top:8px;">
@@ -176,6 +192,8 @@ let score = 0;
 let level10Shown = false;
 const achievements = { brave:false, bravePending:false, power8k:false };
 let xpMult = 1.0;
+
+// IMPORTANTE: multiplicador final de dano do projétil (leva Reborn DPS em conta)
 let playerDamageMult = 1.0;
 
 function pushAchievementBanner(text, ms=3000){
@@ -237,12 +255,17 @@ function addXP(v) {
 
     if (!achievements.power8k && player.level >= 35) {
       achievements.power8k = true;
-      playerDamageMult = 1.10;
+      // Esta conquista buffa sempre, adicional ao DPS/TANK do reborn
+      playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * 1.10;
       setProjectileRangeMult(1.35);
       flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
       pushAchievementBanner("⚡ Um Poder de Mais de 8 mil", 3000);
+    } else {
+      // manter multiplicador coerente com escolha reborn mesmo sem conquista 35
+      playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
     }
-    if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Posso Sentir sua presença"); }
+
+    if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Novo objetivo: Renascer (alcance o Nível 25)"); }
     flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
   }
 }
@@ -289,21 +312,42 @@ function updateRespawns(dt) {
   } else accBoss = 0;
 }
 
-/* ---------- Dano ao Player (inclui marcos) ---------- */
+/* ---------- Dano ao Player (inclui marcos e Reborn Tank/Shield) ---------- */
 function dealDamageToPlayer(raw) {
   if (raw <= 0) return;
   if (player.ignoreChance > 0 && Math.random() < player.ignoreChance) return; // esquiva
-  const def = getPlayerDefPercent();
-  let dmg = raw * (1 - def);
-  if (player.extraDR > 0) dmg *= (1 - player.extraDR);
-  player.hp -= dmg;
+
+  // DR base (stats) + DR extra (marcos) + DR extra do Reborn Tank
+  const baseDef = getPlayerDefPercent();
+  const totalDR = Math.max(0, Math.min(0.95, 1 - (1 - baseDef) * (1 - (player.extraDR || 0)) * (1 - (player.rebornExtraDR || 0))));
+  let remaining = raw;
+
+  // Se tem escudo (TANK), ele recebe dano primeiro com DR mais efetiva
+  if (player.shield > 0) {
+    const shieldDR = Math.max(totalDR, getShieldDefPercent()); // assegura boost no escudo
+    const dmgToShield = remaining * (1 - shieldDR);
+    const taken = Math.min(player.shield, dmgToShield);
+    player.shield -= taken;
+    remaining -= taken; // o que “sobrou” do dano ainda não mitigado pelo escudo
+    if (remaining <= 0) return;
+  }
+
+  // O restante vai na vida com DR normal
+  const dmgToHP = remaining * (1 - totalDR);
+  player.hp -= dmgToHP;
 }
 
 /* ---------- Colisões / Combate ---------- */
 function updateCollisions(dt) {
   currentSlowFactor = 0;
   const regen = getPlayerRegen();
-  if (regen > 0 && player.alive) player.hp = Math.min(player.maxHp, player.hp + regen * player.maxHp * dt);
+  if (regen > 0 && player.alive) {
+    // Regen afeta HP e também recarrega ESCUDO lentamente (metade da taxa)
+    player.hp = Math.min(player.maxHp, player.hp + regen * player.maxHp * dt);
+    if (player.shieldMax > 0) {
+      player.shield = Math.min(player.shieldMax, player.shield + (regen * player.maxHp * 0.5) * dt);
+    }
+  }
 
   // player vs blocos
   for (const b of blocks) {
@@ -412,6 +456,96 @@ function updateRespawn(dt) {
   }
 }
 
+/* ---------- Quests (UI lateral) ---------- */
+const questsDiv = document.getElementById("quests");
+function renderQuests() {
+  if (!questsDiv) return;
+  const started = player.level >= 10 || rebornQuest.started;
+  const done = rebornQuest.completed;
+  const active = started && !done;
+  const statusDot = done ? "done" : (active ? "active" : "");
+  questsDiv.innerHTML = `
+    <div class="quest-title">📜 Missões</div>
+    <div class="quest-item">
+      <div class="quest-dot ${statusDot}"></div>
+      <div>
+        <div><b>Reborn System</b></div>
+        <div class="small">${done ? "Concluída" : (active ? "Progrida até o Lv 25 para desbloquear" : "Será liberada no Lv 10")}</div>
+      </div>
+    </div>`;
+}
+
+/* ---------- Reborn System (UI + lógica) ---------- */
+const rebornBtn = document.getElementById("openReborn");
+const rebornPanel = document.getElementById("rebornPanel");
+
+const rebornQuest = { started:false, completed:false, requiredLevel:25 };
+let rebornPanelState = "status"; // "status" | "choose"
+
+rebornBtn?.addEventListener("click", () => toggleReborn());
+
+function toggleReborn(force) {
+  if (!rebornPanel) return;
+  const show = (typeof force === "boolean") ? force : (rebornPanel.style.display !== "block");
+  rebornPanel.style.display = show ? "block" : "none";
+  if (show) renderRebornPanel();
+}
+function renderRebornPanel() {
+  if (!rebornPanel) return;
+
+  const eligible = player.level >= rebornQuest.requiredLevel && !rebornQuest.completed;
+  const current = `<div class="reborn-row">Seu nível atual: <b>${player.level}</b> • Necessário: <b>${rebornQuest.requiredLevel}</b></div>`;
+  const rebornLabel = `<div class="reborn-row"><span class="reborn-big ${eligible ? "glow" : ""}">${eligible ? "REBORN" : "REBORN"}</span></div>`;
+  const tip = !rebornQuest.completed
+    ? `<div class="small" style="margin-top:6px;opacity:${eligible?1:0.75};">${eligible ? "Clique abaixo para renascer." : "Continue evoluindo para liberar o Reborn."}</div>`
+    : `<div class="small" style="margin-top:6px;">Você já renasceu (${player.rebornClass || "-"})</div>`;
+
+  if (rebornPanelState === "status") {
+    rebornPanel.innerHTML = `
+      <h3>Reborn System</h3>
+      ${current}
+      ${rebornLabel}
+      ${tip}
+      <div class="reborn-row">
+        <button id="rebornAction" ${eligible ? "" : "disabled"}>${eligible ? "Prosseguir" : "Indisponível"}</button>
+        <button id="closeReborn" style="margin-left:8px;">Fechar</button>
+      </div>`;
+    document.getElementById("closeReborn")?.addEventListener("click", () => toggleReborn(false));
+    const act = document.getElementById("rebornAction");
+    if (act && eligible) act.addEventListener("click", () => { rebornPanelState = "choose"; renderRebornPanel(); });
+  } else {
+    // Escolha de classe
+    rebornPanel.innerHTML = `
+      <h3>Escolha sua nova árvore</h3>
+      <div class="choice-grid">
+        <div class="choice" id="pickDPS">
+          <b>DPS</b>
+          <div class="small">• Multiplicador de dano de projétil x1.25<br>• Acesso a futuros upgrades focados em dano</div>
+        </div>
+        <div class="choice" id="pickTANK">
+          <b>TANK</b>
+          <div class="small">• 25% de redução de dano adicional<br>• Nova barra de vida (Escudo) consumida antes da vida<br>• Sua defesa é 25% mais efetiva no escudo</div>
+        </div>
+      </div>
+      <div class="reborn-row">
+        <button id="backReborn" style="margin-top:8px;">Voltar</button>
+      </div>`;
+    document.getElementById("backReborn")?.addEventListener("click", () => { rebornPanelState = "status"; renderRebornPanel(); });
+    document.getElementById("pickDPS")?.addEventListener("click", () => confirmReborn("DPS"));
+    document.getElementById("pickTANK")?.addEventListener("click", () => confirmReborn("TANK"));
+  }
+}
+function confirmReborn(cls) {
+  // aplica reset e bônus da classe
+  doReborn(cls, BASES, getSafeZones());
+  rebornQuest.completed = true;
+  flashEvent(`Reborn concluído! Nova árvore: ${cls}`);
+  playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
+  rebornPanelState = "status";
+  renderRebornPanel();
+  renderQuests();
+}
+
 /* ---------- Render ---------- */
 function drawGrid() {
   const g = 64; ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=1;
@@ -422,17 +556,36 @@ function drawPlayer() {
   const r = player.radius || 28;
   const sx = Math.floor(player.x - cam.x), sy = Math.floor(player.y - cam.y);
   ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fillStyle = player.color || "#4ccfff"; ctx.fill();
+
+  // Barra de ESCUDO (se houver) acima da de HP
+  if (player.shieldMax > 0) {
+    const w=84, h=6;
+    const pctS = Math.max(0, Math.min(1, player.shield / player.shieldMax));
+    ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - r - 26, w, h);
+    ctx.fillStyle="#7ec8ff"; ctx.fillRect(sx - w/2, sy - r - 26, w * pctS, h);
+    ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 26, w, h);
+  }
+
+  // Barra de HP
   if (player.maxHp) {
-    const w=80,h=8, pct=Math.max(0, Math.min(1, player.hp/player.maxHp));
+    const w=84, h=8, pct=Math.max(0, Math.min(1, player.hp/player.maxHp));
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - r - 18, w, h);
     ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - r - 18, w * pct, h);
     ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 18, w, h);
   }
 }
 function drawAchievementOverlays(){ drawAchievementIcons(); drawAchievementBanners(); drawMilestoneBadges(); }
+
 function draw() {
   ctx.fillStyle = "#202020"; ctx.fillRect(0,0,viewW,viewH);
   drawGrid(); drawSafeZones(); drawBlocks(ctx, cam); drawEnemies(ctx, cam); drawPlayerBullets(ctx, cam); drawPlayer(); drawAchievementOverlays();
+
+  // Reforça estado do botão Reborn (brilho quando disponível)
+  if (rebornBtn) {
+    const eligible = player.level >= rebornQuest.requiredLevel && !rebornQuest.completed;
+    rebornBtn.className = eligible ? "glow" : "";
+    rebornBtn.title = eligible ? "Pronto para renascer!" : "Progrida até o nível 25";
+  }
 }
 
 /* ---------- Loop ---------- */
@@ -441,6 +594,11 @@ function update() {
   const now = performance.now();
   const dt = Math.min(0.033, (now - lastTime)/1000);
   lastTime = now;
+
+  // Atualiza início da quest quando chegar ao 10
+  if (!rebornQuest.started && player.level >= 10) {
+    rebornQuest.started = true;
+  }
 
   if (player.alive) handleInput(dt);
   shootCD -= dt; if (isShooting) tryShoot();
@@ -452,7 +610,7 @@ function update() {
   updateBlocksHitTimers(dt);
   updateRespawns(dt);
 
-  centerCameraOnPlayer(); updateHUD();
+  centerCameraOnPlayer(); updateHUD(); renderQuests();
 }
 function gameLoop(){ update(); draw(); requestAnimationFrame(gameLoop); }
 
