@@ -53,21 +53,41 @@ function drawSafeZones() {
   ctx.restore();
 }
 
-/* ===================== Input / Tiro ===================== */
+/* ===================== Input / Tiro (auto-fire) ===================== */
 const keys = new Set();
+let isShooting = false;
+let shootCD = 0;              // cooldown em segundos
+const FIRE_RATE = 0.18;       // 0.18s por tiro ~ 5.5 tiros/s
+let mouseWX = 0, mouseWY = 0; // posição do mouse em coordenadas do mundo
+
+function updateMouseWorld(e){
+  const rect = canvas.getBoundingClientRect();
+  mouseWX = cam.x + (e.clientX - rect.left);
+  mouseWY = cam.y + (e.clientY - rect.top);
+}
+
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key === "escape") toggleSkills(false);
+  if (e.key.toLowerCase() === "escape") toggleSkills(false);
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 
 canvas.addEventListener("mousedown", e => {
   if (!player.alive) return;
-  const rect = canvas.getBoundingClientRect();
-  const tx = cam.x + (e.clientX - rect.left);
-  const ty = cam.y + (e.clientY - rect.top);
-  spawnPlayerBullet(player.x, player.y, tx, ty, 16, Math.max(1, player.dmg));
+  updateMouseWorld(e);
+  isShooting = true;
+  tryShoot();
 });
+window.addEventListener("mouseup", () => { isShooting = false; });
+canvas.addEventListener("mousemove", updateMouseWorld);
+
+function tryShoot(){
+  if (!player.alive) return;
+  if (shootCD <= 0 && isShooting) {
+    spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 16, Math.max(1, player.dmg));
+    shootCD = FIRE_RATE;
+  }
+}
 
 let currentSlowFactor = 0;
 function handleInput(dt) {
@@ -235,7 +255,7 @@ function updateRespawns(dt) {
     accBasic -= RESPAWN.basic;
     const aliveBasics = enemies.filter(e => e.alive && e.type === "basic").length;
     if (aliveBasics < LIMITS.basic) {
-      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
+      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones()); // nível aleatório interno
     }
   }
 
@@ -246,7 +266,7 @@ function updateRespawns(dt) {
       accOrange -= RESPAWN.orange;
       const aliveOranges = enemies.filter(e => e.alive && e.type === "orange").length;
       if (aliveOranges < LIMITS.orange) {
-        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
+        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones()); // nível aleatório interno
       }
     }
   } else {
@@ -260,7 +280,7 @@ function updateRespawns(dt) {
       accBoss = 0;
       const aliveBoss = enemies.some(e => e.alive && e.type === "boss");
       if (!aliveBoss) {
-        spawnBoss(MAP_W, MAP_H, getSafeZones());
+        spawnBoss(MAP_W, MAP_H, getSafeZones()); // nível aleatório interno
         flashEvent("⚠️ Boss apareceu!");
       }
     }
@@ -279,7 +299,7 @@ function updateCollisions(dt) {
     player.hp = Math.min(player.maxHp, player.hp + regen * player.maxHp * dt);
   }
 
-  // Player vs Blocks (contato) + quebra + XP
+  // Player vs Blocks (contato)
   for (const b of blocks) {
     if (!b.alive) continue;
     const t = BLOCK_TYPES[b.type];
@@ -314,9 +334,8 @@ function updateCollisions(dt) {
         pb.alive = false;
         if (e.hp <= 0) {
           e.alive = false;
-          const xp = e.type === "boss" ? 250 : (e.type === "orange" ? 40 : 20);
-          const sc = e.type === "boss" ? 500 : (e.type === "orange" ? 25 : 10);
-          addXP(getPlayerBonusXP(xp)); score += sc;
+          addXP(getPlayerBonusXP(e.xpReward || 10));
+          score += Math.floor((e.xpReward || 10) * 0.5);
           flashEvent(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP");
         }
         break;
@@ -351,9 +370,8 @@ function updateCollisions(dt) {
       e.hp -= dmgToEnemy;
       if (e.hp <= 0) {
         e.alive = false;
-        const xp = e.type === "boss" ? 250 : (e.type === "orange" ? 40 : 20);
-        const sc = e.type === "boss" ? 500 : (e.type === "orange" ? 25 : 10);
-        addXP(getPlayerBonusXP(xp)); score += sc;
+        addXP(getPlayerBonusXP(e.xpReward || 10));
+        score += Math.floor((e.xpReward || 10) * 0.5);
       }
     }
   }
@@ -422,6 +440,10 @@ function update() {
   lastTime = now;
 
   if (player.alive) handleInput(dt);
+
+  // Auto-fire
+  shootCD -= dt;
+  if (isShooting) tryShoot();
 
   updateCollisions(dt);
   updateEnemies(dt, getSafeZones());
