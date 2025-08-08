@@ -1,11 +1,21 @@
 export const playerBullets = []; // {x,y,vx,vy,life,alive,damage}
+let projectileRangeMult = 1;
+
+export function setProjectileRangeMult(mult){
+  projectileRangeMult = Math.max(0.1, mult || 1);
+}
 
 export function spawnPlayerBullet(sx, sy, tx, ty, speedPxPerFrame, damage) {
   const dx = tx - sx, dy = ty - sy;
   const d = Math.hypot(dx, dy) || 1;
   const vx = (dx/d) * speedPxPerFrame;
   const vy = (dy/d) * speedPxPerFrame;
-  playerBullets.push({ x:sx, y:sy, vx, vy, life:1.4, alive:true, damage });
+  const baseLife = 1.4; // segundos
+  playerBullets.push({
+    x:sx, y:sy, vx, vy,
+    life: baseLife * projectileRangeMult,
+    alive:true, damage
+  });
 }
 
 export function updatePlayerBullets(dt) {

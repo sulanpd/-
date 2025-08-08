@@ -191,11 +191,16 @@ export function drawEnemies(ctx, cam) {
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
     ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w*pct, 6);
 
-    // Nível (texto)
-    ctx.fillStyle="#fff";
-    ctx.font="12px sans-serif";
-    ctx.textAlign="center";
-    ctx.fillText(`Lv ${e.level}`, sx, sy - e.radius - 22);
+    // Nível (texto) com cor por tipo
+    let levelColor = "#e0e0e0";
+    if (e.type === "basic") levelColor = "#7ec8ff";     // azul claro
+    else if (e.type === "orange") levelColor = "#ffd27e"; // dourado
+    else if (e.type === "boss") levelColor = "#ff6b8a";   // rosa forte
+
+    ctx.fillStyle = levelColor;
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`Lv ${e.level}`, sx, sy - e.radius - 24);
   }
 
   // balas dos laranjas

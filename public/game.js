@@ -9,7 +9,7 @@ import {
   blocks, BLOCK_TYPES, spawnBlock, drawBlocks
 } from "./blocks.js";
 import {
-  playerBullets, spawnPlayerBullet, updatePlayerBullets, drawPlayerBullets
+  playerBullets, spawnPlayerBullet, updatePlayerBullets, drawPlayerBullets, setProjectileRangeMult
 } from "./projectiles.js";
 import { clamp } from "./utils.js";
 
@@ -84,7 +84,8 @@ canvas.addEventListener("mousemove", updateMouseWorld);
 function tryShoot(){
   if (!player.alive) return;
   if (shootCD <= 0 && isShooting) {
-    spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 16, Math.max(1, player.dmg));
+    const dmg = Math.max(1, player.dmg) * playerDamageMult;
+    spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 16, dmg);
     shootCD = FIRE_RATE;
   }
 }
@@ -214,17 +215,34 @@ function upgradeSkill(key) {
   updateHUD();
 }
 
-/* ===================== Score / XP / Level ===================== */
+/* ===================== Score / XP / Level & Conquistas ===================== */
 let score = 0;
 let level10Shown = false;
 
+// conquistas
+const achievements = {
+  brave: false,   // Coragem dos Fracos
+  power8k: false  // Um Poder de Mais de 8 mil
+};
+let xpMult = 1.0;
+let playerDamageMult = 1.0;
+
 function addXP(v) {
-  player.xp += v;
+  player.xp += v * xpMult;
   while (player.xp >= player.xpToNext) {
     player.xp -= player.xpToNext;
     player.level++; player.points++;
     player.xpToNext = xpToNext(player.level);
     playerBaseStats(BASES);
+
+    // conquista "Um Poder de Mais de 8 mil" no lvl 35
+    if (!achievements.power8k && player.level >= 35) {
+      achievements.power8k = true;
+      playerDamageMult = 1.10;         // +10% dano
+      setProjectileRangeMult(1.35);    // +35% alcance
+      flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
+    }
+
     if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Posso sentir sua presença"); }
     flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
   }
@@ -310,7 +328,7 @@ function updateCollisions(dt) {
       currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
       const def = getPlayerDefPercent();
       player.hp -= t.dmg * (1 - def) * dt * 10;
-      b.hp -= Math.max(1, player.bodyDmg) * dt;
+      b.hp -= Math.max(1, player.bodyDmg) * playerDamageMult * dt;
       if (b.hp <= 0) {
         b.alive = false;
         const baseXP = t.xp || 0;
@@ -366,7 +384,7 @@ function updateCollisions(dt) {
     if (dist < (player.radius||28) + e.radius) {
       const def = getPlayerDefPercent();
       player.hp -= e.dmg * (1 - def) * dt;
-      const dmgToEnemy = Math.max(1, player.bodyDmg) * (1 - (e.dmgReduce || 0)) * dt;
+      const dmgToEnemy = Math.max(1, player.bodyDmg) * playerDamageMult * (1 - (e.dmgReduce || 0)) * dt;
       e.hp -= dmgToEnemy;
       if (e.hp <= 0) {
         e.alive = false;
@@ -376,11 +394,17 @@ function updateCollisions(dt) {
     }
   }
 
-  // Morte do player
+  // Morte do player (checa conquista "Coragem dos Fracos")
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
     player.respawnTimer = 2.5;
     showDeathMsg(true);
+
+    if (!achievements.brave && player.level > 10) {
+      achievements.brave = true;
+      xpMult = 1.25; // +25% XP de todas as fontes
+      flashEvent('Você obteve a conquista "Coragem dos Fracos" (+25% XP)');
+    }
   }
 }
 
