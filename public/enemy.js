@@ -1,4 +1,9 @@
+/* ========================================================================
+ * enemy.js
+ * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
+ * ===================================================================== */
 import { player, getPlayerDefPercent } from "./player.js";
+import { randInt } from "./utils.js";
 
 export const enemies = [];
 export const shooterBullets = [];   // projéteis dos laranjas
@@ -6,15 +11,16 @@ export const bossProjectiles = [];  // projéteis do boss (skills)
 
 const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
 
+/** Bases por tipo de inimigo. Escala por nível é aplicada em runtime. */
 const BASES = {
   basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
   orange: { hp:210, dmg:14, xp:40,  radius:26, color:"#ff9c40",  speed:2.2 },
   boss:   { hp:2800,dmg:55, xp:250, radius:60, color:"#b1002a",  speed:1.8 }
 };
 
-function randInt(min, max){ return Math.floor(Math.random()*(max-min+1))+min; }
 function combineDR(a,b){ return 1 - (1-a)*(1-b); } // composição de reduções
 
+/** Posição aleatória fora das safe zones. */
 function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
   let p, ok=false;
   for (let i=0;i<50 && !ok;i++){
@@ -24,12 +30,14 @@ function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
   return p || { x: mapW*0.5, y: mapH*0.5 };
 }
 
+/** Faixa de nível por tipo. */
 function randomLevelForType(type){
   if (type==="basic")  return randInt(1,10);
   if (type==="orange") return randInt(9,30);
   return randInt(10,60); // boss
 }
 
+/** Escalas por nível: +10% HP / nível, +5% dano / nível, +15% DR a cada 10 níveis. XP: +10% / nível. */
 function scaleByLevel(type, level){
   const b = BASES[type];
   const lvl = Math.max(1, level|0);
@@ -40,6 +48,7 @@ function scaleByLevel(type, level){
   return { hp, dmg, xp, levelDR, lvl };
 }
 
+/** Cria um inimigo do tipo informado, com nível (opcional) e escalas aplicadas. */
 export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
   const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
   const b = BASES[type];
@@ -71,15 +80,17 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
   return e;
 }
 
+/** atalho p/ spawn do boss (nível aleatório respeitando a faixa) */
 export function spawnBoss(mapW, mapH, safeZones, level=null){
   return spawnEnemy("boss", mapW, mapH, safeZones, level);
 }
 
+/** Atualiza IA, projéteis e skills. */
 export function updateEnemies(dt, safeZones) {
   for (const e of enemies) {
     if (!e.alive) continue;
 
-    // Fases do boss
+    // Fases do boss e efeitos de fase 3
     if (e.type==="boss") {
       if (e.hp <= e.maxHp*0.6 && e.phase < 2) e.phase = 2;
       if (e.hp <= e.maxHp*0.4 && e.phase < 3) {
@@ -95,14 +106,14 @@ export function updateEnemies(dt, safeZones) {
     const dist   = Math.hypot(e.x - player.x, e.y - player.y);
     const detect = ENEMY_DETECT[e.type] || 650;
 
-    // Movimento
+    // Movimento perseguindo jogador (fora da safe zone e dentro do alcance de detecção)
     if (!inSafe && dist < detect) {
       const d = Math.max(1, dist);
       e.x += (player.x - e.x)/d * e.speed * 60 * dt;
       e.y += (player.y - e.y)/d * e.speed * 60 * dt;
     }
 
-    // Shooters (laranja) disparam projéteis
+    // Tiro dos "laranja"
     if (e.type==="orange" && !inSafe && dist < 700) {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
@@ -113,20 +124,20 @@ export function updateEnemies(dt, safeZones) {
       }
     }
 
-    // Skills do boss
+    // Skills do boss (trap + circle)
     if (e.type==="boss" && !inSafe) {
       e.s1cd -= dt; e.s2cd -= dt; e.lastSkillCd -= dt;
       if (e.lastSkillCd <= 0) {
         const wantS1 = e.s1cd <= 0;
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
         if (wantS1 && (!wantS2 || Math.random()<0.6)) {
-          // Skill 1: trap 1.5s
+          // Skill 1: projétil que congela por 1.5s
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
           bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10, vy:(dy/d)*10, life:2.5, alive:true, type:"trap" });
-          e.s1cd = (e.phase>=3) ? 3 : 6;
-          e.lastSkillCd = 1.5;
+          e.s1cd = (e.phase>=3) ? 3 : 6; // cd reduzido na fase 3
+          e.lastSkillCd = 1.5;          // nunca usa 2 skills ao mesmo tempo
         } else if (wantS2) {
-          // Skill 2: círculo (debuff)
+          // Skill 2: projétil maior que aplica debuff (simula círculo)
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
           bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8, vy:(dy/d)*8, life:2.8, alive:true, type:"circle" });
           e.s2cd = 5;
@@ -160,15 +171,16 @@ export function updateEnemies(dt, safeZones) {
       if (p.type==="trap") {
         player.freezeTimer = Math.max(player.freezeTimer, 1.5);
       } else if (p.type==="circle") {
+        // Debuff: -25% defesa e -50% velocidade por ~4s
         player.defDebuff = Math.max(player.defDebuff, 0.25);
         player.slowMult = Math.min(player.slowMult, 0.5);
-        player.circleTimer = 4; // 4s de debuff
+        player.circleTimer = 4;
       }
       p.alive=false;
     }
   }
 
-  // Decaimento do debuff de círculo
+  // Decaimento do debuff do círculo
   if (player.circleTimer !== undefined) {
     player.circleTimer -= dt;
     if (player.circleTimer <= 0) {
@@ -179,10 +191,13 @@ export function updateEnemies(dt, safeZones) {
   }
 }
 
+/** Desenha inimigos + barras de HP + nível colorido por tipo. */
 export function drawEnemies(ctx, cam) {
   for (const e of enemies) {
     if (!e.alive) continue;
     const sx = Math.floor(e.x - cam.x), sy = Math.floor(e.y - cam.y);
+
+    // corpo
     ctx.fillStyle = e.color;
     ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
 
@@ -193,10 +208,9 @@ export function drawEnemies(ctx, cam) {
 
     // Nível (texto) com cor por tipo
     let levelColor = "#e0e0e0";
-    if (e.type === "basic") levelColor = "#7ec8ff";     // azul claro
-    else if (e.type === "orange") levelColor = "#ffd27e"; // dourado
-    else if (e.type === "boss") levelColor = "#ff6b8a";   // rosa forte
-
+    if (e.type === "basic")   levelColor = "#7ec8ff";   // azul claro
+    if (e.type === "orange")  levelColor = "#ffd27e";   // dourado
+    if (e.type === "boss")    levelColor = "#ff6b8a";   // rosa forte
     ctx.fillStyle = levelColor;
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";

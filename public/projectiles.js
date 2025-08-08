@@ -1,3 +1,7 @@
+/* ========================================================================
+ * projectiles.js
+ * Projéteis do jogador com alcance configurável (para conquista lvl 35).
+ * ===================================================================== */
 export const playerBullets = []; // {x,y,vx,vy,life,alive,damage}
 let projectileRangeMult = 1;
 
@@ -5,6 +9,7 @@ export function setProjectileRangeMult(mult){
   projectileRangeMult = Math.max(0.1, mult || 1);
 }
 
+/** Cria projétil do jogador apontando para (tx,ty). */
 export function spawnPlayerBullet(sx, sy, tx, ty, speedPxPerFrame, damage) {
   const dx = tx - sx, dy = ty - sy;
   const d = Math.hypot(dx, dy) || 1;

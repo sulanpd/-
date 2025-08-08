@@ -1,3 +1,7 @@
+/* ========================================================================
+ * game.js
+ * Loop principal: render, input, HUD, skills, respawns, conquistas.
+ * ===================================================================== */
 import {
   player, resetPlayer, playerBaseStats, getPlayerRegen,
   getPlayerDefPercent, getPlayerBonusXP, xpToNext
@@ -29,7 +33,7 @@ const BASES = {
 };
 playerBaseStats(BASES);
 
-/* ===================== Safe Zones ===================== */
+/* ===================== Safe Zones (visíveis) ===================== */
 export function getSafeZones() {
   return [
     { x: MAP_W * 0.25, y: MAP_H * 0.25, r: 160 },
@@ -68,7 +72,7 @@ function updateMouseWorld(e){
 
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key.toLowerCase() === "escape") toggleSkills(false);
+  if (e.key.toLowerCase() === "escape") toggleSkills(false); // abre/fecha com Esc
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 
@@ -84,7 +88,7 @@ canvas.addEventListener("mousemove", updateMouseWorld);
 function tryShoot(){
   if (!player.alive) return;
   if (shootCD <= 0 && isShooting) {
-    const dmg = Math.max(1, player.dmg) * playerDamageMult;
+    const dmg = Math.max(1, player.dmg) * playerDamageMult; // buff de conquista
     spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 16, dmg);
     shootCD = FIRE_RATE;
   }
@@ -146,12 +150,15 @@ function updateHUD() {
     xpbar.style.width = Math.floor(pct * 100) + "%";
   }
 }
+
+/** Avisos temporários (3s) */
 function flashEvent(msg) {
   if (!eventMsg) return;
   eventMsg.textContent = msg;
   eventMsg.style.display = "block";
   setTimeout(() => { eventMsg.style.display = "none"; }, 3000);
 }
+
 function showDeathMsg(show) {
   if (!deathMsg) return;
   deathMsg.style.display = show ? "block" : "none";
@@ -221,13 +228,14 @@ let level10Shown = false;
 
 // conquistas (ícones e buffs)
 const achievements = {
-  brave: false,       // Coragem dos Fracos (aplicada após respawn)
-  bravePending: false,
+  brave: false,       // Coragem dos Fracos (ativa após respawn)
+  bravePending: false,// setado na morte, aplicado no respawn
   power8k: false      // Um Poder de Mais de 8 mil
 };
-let xpMult = 1.0;
-let playerDamageMult = 1.0;
+let xpMult = 1.0;             // multiplicador global de XP (afeta addXP)
+let playerDamageMult = 1.0;   // dano do player (tiro e corpo)
 
+/** Aplica XP (com multiplicador global). Faz o level-up e checa conquistas. */
 function addXP(v) {
   player.xp += v * xpMult;
   while (player.xp >= player.xpToNext) {
@@ -239,13 +247,18 @@ function addXP(v) {
     // conquista "Um Poder de Mais de 8 mil" no lvl 35
     if (!achievements.power8k && player.level >= 35) {
       achievements.power8k = true;
-      playerDamageMult = 1.10;         // +10% dano
-      setProjectileRangeMult(1.35);    // +35% alcance
+      playerDamageMult = 1.10;         // +10% dano (tiro e corpo)
+      setProjectileRangeMult(1.35);    // +35% alcance do projétil
       flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
       pushAchievementBanner("⚡ Um Poder de Mais de 8 mil", 3000);
     }
 
-    if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Posso sentir sua presença"); }
+    // mensagem de nível 10
+    if (player.level === 10 && !level10Shown) {
+      level10Shown = true;
+      flashEvent("Posso Sentir sua presença");
+    }
+
     flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
   }
 }
@@ -275,7 +288,7 @@ function drawAchievementBanners(){
 }
 function drawAchievementIcons(){
   const icons = [];
-  if (achievements.brave)  icons.push({emoji:"🏅", title:"+25% XP"});
+  if (achievements.brave)   icons.push({emoji:"🏅", title:"+25% XP"});
   if (achievements.power8k) icons.push({emoji:"⚡", title:"+10% DMG + Alcance"});
 
   const x0 = 10, y0 = 10, size = 28, pad = 6;
@@ -344,6 +357,7 @@ function updateRespawns(dt) {
       if (!aliveBoss) {
         spawnBoss(MAP_W, MAP_H, getSafeZones()); // nível aleatório interno
         flashEvent("⚠️ Boss apareceu!");
+        pushAchievementBanner("⚠️ Boss apareceu!", 2000);
       }
     }
   } else {
@@ -446,7 +460,7 @@ function updateCollisions(dt) {
     }
   }
 
-  // Morte do player → apenas marca conquista "Coragem..." como pendente
+  // Morte do player → marca conquista "Coragem..." como pendente (aplicada no respawn)
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
     player.respawnTimer = 2.5;
@@ -458,6 +472,7 @@ function updateCollisions(dt) {
   }
 }
 
+/* ===================== Respawn do Player (e concessão da conquista) ===================== */
 function updateRespawn(dt) {
   if (!player.alive) {
     player.respawnTimer -= dt;
@@ -466,7 +481,7 @@ function updateRespawn(dt) {
       playerBaseStats(BASES);
       showDeathMsg(false);
 
-      // Concede "Coragem dos Fracos" no momento do respawn
+      // Concede "Coragem dos Fracos" no momento do respawn (se pendente)
       if (achievements.bravePending && !achievements.brave && player.level > 10) {
         achievements.bravePending = false;
         achievements.brave = true;
@@ -475,65 +490,6 @@ function updateRespawn(dt) {
         pushAchievementBanner("🏅 Coragem dos Fracos (+25% XP)", 3000);
       }
     }
-  }
-}
-
-/* ===================== Respawns (Timers + Limites) ===================== */
-const LIMITS = { basic: 12, orange: 6, boss: 1, blocks: 80 };
-const RESPAWN = { basic: 40, orange: 120, boss: 600, block: 2 }; // s
-let accBasic = 0, accOrange = 0, accBoss = 0, accBlock = 0;
-
-function updateRespawns(dt) {
-  // Blocos — 1 a cada 2s se < 80
-  accBlock += dt;
-  if (accBlock >= RESPAWN.block) {
-    accBlock -= RESPAWN.block;
-    const aliveBlocks = blocks.filter(b => b.alive).length;
-    if (aliveBlocks < LIMITS.blocks) {
-      const types = ["yellow","blue","purple"];
-      const type = types[(Math.random()*types.length)|0];
-      spawnBlock(type, MAP_W, MAP_H, getSafeZones());
-    }
-  }
-
-  // Básicos — 1 a cada 40s se < 12
-  accBasic += dt;
-  if (accBasic >= RESPAWN.basic) {
-    accBasic -= RESPAWN.basic;
-    const aliveBasics = enemies.filter(e => e.alive && e.type === "basic").length;
-    if (aliveBasics < LIMITS.basic) {
-      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
-    }
-  }
-
-  // Laranjas — 1 a cada 120s se < 6 e lvl >= 15
-  if (player.level >= 15) {
-    accOrange += dt;
-    if (accOrange >= RESPAWN.orange) {
-      accOrange -= RESPAWN.orange;
-      const aliveOranges = enemies.filter(e => e.alive && e.type === "orange").length;
-      if (aliveOranges < LIMITS.orange) {
-        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
-      }
-    }
-  } else {
-    accOrange = 0;
-  }
-
-  // Boss — 1 a cada 10 min, lvl >= 45, 1 vivo no máximo
-  if (player.level >= 45) {
-    accBoss += dt;
-    if (accBoss >= RESPAWN.boss) {
-      accBoss = 0;
-      const aliveBoss = enemies.some(e => e.alive && e.type === "boss");
-      if (!aliveBoss) {
-        spawnBoss(MAP_W, MAP_H, getSafeZones());
-        flashEvent("⚠️ Boss apareceu!");
-        pushAchievementBanner("⚠️ Boss apareceu!", 2000);
-      }
-    }
-  } else {
-    accBoss = 0;
   }
 }
 
