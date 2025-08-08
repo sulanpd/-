@@ -1,25 +1,54 @@
-// blocks.js
+export const blocks = [];
 export const BLOCK_TYPES = {
-  yellow: { color: "#f0e130", hp: 24,  xp: 12,  dmg: 0.1, size: 32, slow: 0.8 },
-  blue:   { color: "#3cf",    hp: 48,  xp: 24,  dmg: 0.2, size: 32, slow: 0.6 },
-  purple: { color: "#b36ef8", hp: 180, xp: 120, dmg: 1.8, size: 64, slow: 0.2 }
+  yellow: { size: 40, color: "#ff0", xp: 20, dmg: 10, slow: 0.1 },
+  blue:   { size: 50, color: "#0ff", xp: 30, dmg: 15, slow: 0.15 },
+  purple: { size: 60, color: "#f0f", xp: 50, dmg: 20, slow: 0.2 }
 };
 
-export let blocks = [];
+export function spawnBlock(type, mapW, mapH, safeZones) {
+  let b = {
+    type,
+    x: Math.random() * mapW,
+    y: Math.random() * mapH,
+    hp: (BLOCK_TYPES[type].size || 40) * 5,
+    alive: true
+  };
+  if (safeZones.some(z => Math.hypot(z.x - b.x, z.y - b.y) < z.r + 80)) {
+    b.x += 200; b.y += 200;
+  }
+  blocks.push(b);
+}
 
-export function spawnBlock(type, MAP_W, MAP_H, SAFE_ZONES) {
-  let bx, by, safe;
-  do {
-    bx = Math.random() * (MAP_W - 120) + 60;
-    by = Math.random() * (MAP_H - 120) + 60;
-    safe = SAFE_ZONES.some(z => Math.hypot(bx - z.x, by - z.y) < z.r + 50);
-  } while (safe);
+export function updateBlocks(dt, player) {
+  for (const b of blocks) {
+    if (!b.alive) continue;
+    const t = BLOCK_TYPES[b.type];
+    const dist = Math.hypot(player.x - b.x, player.y - b.y);
 
-  const t = BLOCK_TYPES[type];
-  blocks.push({
-    x: bx, y: by,
-    alive: true, type,
-    hp: t.hp,
-    id: Math.random().toString(36).slice(2)
-  });
+    // Body damage
+    if (dist < player.radius + t.size / 2) {
+      b.hp -= player.bodyDmg * dt;
+      player.hp -= t.dmg * dt;
+      if (b.hp <= 0) b.alive = false;
+    }
+
+    // Tiros
+    for (const p of player.shots || []) {
+      if (!p.alive) continue;
+      if (Math.hypot(p.x - b.x, p.y - b.y) < t.size / 2 + p.radius) {
+        b.hp -= p.dmg;
+        p.alive = false;
+        if (b.hp <= 0) b.alive = false;
+      }
+    }
+  }
+}
+
+export function drawBlocks(ctx, cam) {
+  for (const b of blocks) {
+    if (!b.alive) continue;
+    const t = BLOCK_TYPES[b.type];
+    ctx.fillStyle = t.color;
+    ctx.fillRect(b.x - cam.x - t.size/2, b.y - cam.y - t.size/2, t.size, t.size);
+  }
 }
