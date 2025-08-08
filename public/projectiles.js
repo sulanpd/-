@@ -30,7 +30,7 @@ export function updateProjectiles(dt) {
 
     // Colisão com player
     const dist = Math.hypot(p.x - player.x, p.y - player.y);
-    if (dist < player.radius + p.radius) {
+    if (dist < (player.radius || 28) + p.radius) {
       if (p.type === "trap") {
         player.trapped = 1.5; // 1.5s preso
       } else if (p.type === "circle") {
@@ -53,17 +53,17 @@ export function updateProjectiles(dt) {
 }
 
 export function updateCircles(dt) {
-  for (const c of circles) {
-    // Player dentro do círculo
+  for (let i = circles.length - 1; i >= 0; i--) {
+    const c = circles[i];
     const dist = Math.hypot(c.x - player.x, c.y - player.y);
     if (dist < c.r) {
       player.speed *= 1 - c.slow;
       player.defBonus = -(c.defReduce);
     }
 
-    // Se o círculo perde HP, remove
+    // Se o círculo perder HP, remove
     if (c.hp <= 0) {
-      circles.splice(circles.indexOf(c), 1);
+      circles.splice(i, 1);
     }
   }
 }

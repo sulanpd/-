@@ -1,45 +1,67 @@
+import { player, getPlayerBonusXP } from "./player.js";
+
 export const blocks = [];
+
 export const BLOCK_TYPES = {
-  yellow: { size: 40, color: "#ff0", xp: 20, dmg: 10, slow: 0.1 },
-  blue:   { size: 50, color: "#0ff", xp: 30, dmg: 15, slow: 0.15 },
-  purple: { size: 60, color: "#f0f", xp: 50, dmg: 20, slow: 0.2 }
+  yellow: { color: "#f1c40f", size: 40, hp: 50, dmg: 5, slow: 0.3, xp: 10 },
+  blue:   { color: "#3498db", size: 50, hp: 80, dmg: 8, slow: 0.4, xp: 20 },
+  purple: { color: "#9b59b6", size: 60, hp: 120, dmg: 12, slow: 0.5, xp: 30 }
 };
 
 export function spawnBlock(type, mapW, mapH, safeZones) {
-  let b = {
+  const t = BLOCK_TYPES[type];
+  if (!t) return;
+
+  let pos;
+  let inSafe;
+  do {
+    pos = { x: Math.random() * mapW, y: Math.random() * mapH };
+    inSafe = safeZones.some(s => Math.hypot(pos.x - s.x, pos.y - s.y) < s.r + t.size);
+  } while (inSafe);
+
+  blocks.push({
     type,
-    x: Math.random() * mapW,
-    y: Math.random() * mapH,
-    hp: (BLOCK_TYPES[type].size || 40) * 5,
+    x: pos.x,
+    y: pos.y,
+    hp: t.hp,
     alive: true
-  };
-  if (safeZones.some(z => Math.hypot(z.x - b.x, z.y - b.y) < z.r + 80)) {
-    b.x += 200; b.y += 200;
-  }
-  blocks.push(b);
+  });
 }
 
-export function updateBlocks(dt, player) {
+export function updateBlocks(dt) {
   for (const b of blocks) {
     if (!b.alive) continue;
     const t = BLOCK_TYPES[b.type];
-    const dist = Math.hypot(player.x - b.x, player.y - b.y);
+    if (!t) continue;
 
-    // Body damage
-    if (dist < player.radius + t.size / 2) {
-      b.hp -= player.bodyDmg * dt;
-      player.hp -= t.dmg * dt;
-      if (b.hp <= 0) b.alive = false;
-    }
+    // Dano por contato (Body Damage)
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    const dist = Math.hypot(dx, dy);
+    const overlap = (t.size / 2 + player.radius) - dist;
 
-    // Tiros
-    for (const p of player.shots || []) {
-      if (!p.alive) continue;
-      if (Math.hypot(p.x - b.x, p.y - b.y) < t.size / 2 + p.radius) {
-        b.hp -= p.dmg;
-        p.alive = false;
-        if (b.hp <= 0) b.alive = false;
+    if (overlap > 0) {
+      b.hp -= Math.max(1, player.bodyDmg || 0) * dt * 10;
+      if (b.hp <= 0) {
+        b.alive = false;
+        const baseXP = t.xp || 0;
+        const gained = getPlayerBonusXP(baseXP);
+        player.xp += gained;
       }
+    }
+  }
+}
+
+export function damageBlockByProjectile(block, damage) {
+  if (!block.alive) return;
+  block.hp -= damage;
+  if (block.hp <= 0) {
+    block.alive = false;
+    const t = BLOCK_TYPES[block.type];
+    if (t) {
+      const baseXP = t.xp || 0;
+      const gained = getPlayerBonusXP(baseXP);
+      player.xp += gained;
     }
   }
 }
@@ -48,7 +70,13 @@ export function drawBlocks(ctx, cam) {
   for (const b of blocks) {
     if (!b.alive) continue;
     const t = BLOCK_TYPES[b.type];
+    if (!t) continue;
     ctx.fillStyle = t.color;
-    ctx.fillRect(b.x - cam.x - t.size/2, b.y - cam.y - t.size/2, t.size, t.size);
+    ctx.fillRect(
+      b.x - cam.x - t.size / 2,
+      b.y - cam.y - t.size / 2,
+      t.size,
+      t.size
+    );
   }
 }
