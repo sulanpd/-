@@ -1,6 +1,5 @@
 /* ========================================================================
- * game.js
- * Loop principal e integração de tudo. (Revisado: sem duplicatas + Reborn)
+ * game.js — XP Mult por Reborn (até 3), indicador visual e bloqueio Body DPS
  * ===================================================================== */
 import {
   player, resetPlayer, playerBaseStats, getPlayerRegen,
@@ -113,6 +112,14 @@ const xpbar = document.getElementById("xpbar");
 const eventMsg = document.getElementById("eventMsg");
 const deathMsg = document.getElementById("deathMsg");
 const dmgReduceIcon = document.getElementById("dmgReduceIcon");
+const rebornBadge = document.getElementById("rebornBadge");
+
+function updateRebornBadge() {
+  if (!rebornBadge) return;
+  const n = player.rebornCount || 0;
+  rebornBadge.textContent = `⭐ x${n} / 3`;
+  rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n*25}%`;
+}
 
 function updateHUD() {
   if (hudHp) hudHp.textContent = `${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`;
@@ -121,6 +128,7 @@ function updateHUD() {
   if (spanPoints) spanPoints.textContent = player.points;
   if (xpbar) { const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext)); xpbar.style.width = Math.floor(pct * 100) + "%"; }
   if (dmgReduceIcon) dmgReduceIcon.style.display = (player.milestones.def10 ? "flex" : "none");
+  updateRebornBadge();
 }
 function flashEvent(msg) {
   if (!eventMsg) return;
@@ -143,11 +151,23 @@ function toggleSkills(force) {
 function renderSkills() {
   if (!skillsDiv) return;
   if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
+
+  // Bloqueio de Body Damage se for DPS após Reborn
+  const isDPS = player.rebornClass === "DPS";
+  const bodyDisabled = isDPS;
+
   const rows = [
-    ["dmg","Dano"],["body","Body Damage"],["def","Defesa"],["hp","Vida"],["regen","Regeneração"],["speed","Velocidade"],["mob","Mobilidade"]
-  ].map(([k,label])=>{
+    ["dmg","Dano", false],
+    ["body","Body Damage", bodyDisabled],
+    ["def","Defesa", false],
+    ["hp","Vida", false],
+    ["regen","Regeneração", false],
+    ["speed","Velocidade", false],
+    ["mob","Mobilidade", false],
+  ].map(([k,label,locked])=>{
     const v = player.skill[k]||0;
-    return `<div class="skill-row"><span>${label}: <b>${v}</b></span><button class="up-skill" data-k="${k}" ${player.points<=0?"disabled":""}>+1</button></div>`;
+    const lockNote = (k==="body" && locked) ? " <span style='font-size:11px;opacity:.8;'>(exclusivo de TANK após Reborn)</span>" : "";
+    return `<div class="skill-row"><span>${label}${lockNote}: <b>${v}</b></span><button class="up-skill" data-k="${k}" ${player.points<=0||locked?"disabled":""}>+1</button></div>`;
   }).join("");
 
   const ms = getPlayerMilestoneSummary();
@@ -159,7 +179,8 @@ function renderSkills() {
 
   const rebornLine = player.hasReborn
     ? `<div style="margin:8px 0 10px 0;padding:8px;border-radius:10px;border:1px solid #556;background:#1b2230;">
-         <b>Árvore Reborn</b>: ${player.rebornClass || "-"} ${player.rebornClass==="DPS"?"• Multiplicador de projétil x1.25": (player.rebornClass==="TANK"?"• DR +25% & Escudo":"")}
+         <b>Árvore Reborn</b>: ${player.rebornClass || "-"} ${player.rebornClass==="DPS"?"• Multiplicador de projétil x1.25 • Body Damage desativado (exclusivo de TANK)":
+         (player.rebornClass==="TANK"?"• DR +25% & Escudo (60% do HP) • Body Damage disponível":"")}
        </div>`
     : "";
 
@@ -181,6 +202,8 @@ function renderSkills() {
 function upgradeSkill(key) {
   if (player.points <= 0) return;
   if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
+  // trava Body se for DPS
+  if (key === "body" && player.rebornClass === "DPS") return;
   player.skill[key] = (player.skill[key] || 0) + 1;
   player.points -= 1;
   playerBaseStats(BASES);
@@ -191,9 +214,16 @@ function upgradeSkill(key) {
 let score = 0;
 let level10Shown = false;
 const achievements = { brave:false, bravePending:false, power8k:false };
-let xpMult = 1.0;
 
-// IMPORTANTE: multiplicador final de dano do projétil (leva Reborn DPS em conta)
+/* multiplicadores */
+let xpMult = 1.0;
+function updateXpMult() {
+  const rebornMult = 1 + 0.25 * (player.rebornCount || 0); // +25% por Reborn
+  const braveMult = achievements.brave ? 1.25 : 1.0;       // +25% (Coragem dos Fracos)
+  xpMult = rebornMult * braveMult;
+}
+
+// Dano de projétil (considera DPS e conquista 35)
 let playerDamageMult = 1.0;
 
 function pushAchievementBanner(text, ms=3000){
@@ -255,13 +285,11 @@ function addXP(v) {
 
     if (!achievements.power8k && player.level >= 35) {
       achievements.power8k = true;
-      // Esta conquista buffa sempre, adicional ao DPS/TANK do reborn
       playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * 1.10;
       setProjectileRangeMult(1.35);
       flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
       pushAchievementBanner("⚡ Um Poder de Mais de 8 mil", 3000);
     } else {
-      // manter multiplicador coerente com escolha reborn mesmo sem conquista 35
       playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
     }
 
@@ -270,7 +298,7 @@ function addXP(v) {
   }
 }
 
-/* ---------- Respawns (limites + timers) ---------- */
+/* ---------- Respawns ---------- */
 const LIMITS = { basic:12, orange:6, boss:1, blocks:80 };
 const RESPAWN = { basic:40, orange:120, boss:600, block:2 };
 let accBasic=0, accOrange=0, accBoss=0, accBlock=0;
@@ -312,27 +340,24 @@ function updateRespawns(dt) {
   } else accBoss = 0;
 }
 
-/* ---------- Dano ao Player (inclui marcos e Reborn Tank/Shield) ---------- */
+/* ---------- Dano ao Player ---------- */
 function dealDamageToPlayer(raw) {
   if (raw <= 0) return;
-  if (player.ignoreChance > 0 && Math.random() < player.ignoreChance) return; // esquiva
+  if (player.ignoreChance > 0 && Math.random() < player.ignoreChance) return;
 
-  // DR base (stats) + DR extra (marcos) + DR extra do Reborn Tank
   const baseDef = getPlayerDefPercent();
   const totalDR = Math.max(0, Math.min(0.95, 1 - (1 - baseDef) * (1 - (player.extraDR || 0)) * (1 - (player.rebornExtraDR || 0))));
   let remaining = raw;
 
-  // Se tem escudo (TANK), ele recebe dano primeiro com DR mais efetiva
   if (player.shield > 0) {
-    const shieldDR = Math.max(totalDR, getShieldDefPercent()); // assegura boost no escudo
+    const shieldDR = Math.max(totalDR, getShieldDefPercent());
     const dmgToShield = remaining * (1 - shieldDR);
     const taken = Math.min(player.shield, dmgToShield);
     player.shield -= taken;
-    remaining -= taken; // o que “sobrou” do dano ainda não mitigado pelo escudo
+    remaining -= taken;
     if (remaining <= 0) return;
   }
 
-  // O restante vai na vida com DR normal
   const dmgToHP = remaining * (1 - totalDR);
   player.hp -= dmgToHP;
 }
@@ -342,7 +367,6 @@ function updateCollisions(dt) {
   currentSlowFactor = 0;
   const regen = getPlayerRegen();
   if (regen > 0 && player.alive) {
-    // Regen afeta HP e também recarrega ESCUDO lentamente (metade da taxa)
     player.hp = Math.min(player.maxHp, player.hp + regen * player.maxHp * dt);
     if (player.shieldMax > 0) {
       player.shield = Math.min(player.shieldMax, player.shield + (regen * player.maxHp * 0.5) * dt);
@@ -372,11 +396,10 @@ function updateCollisions(dt) {
     }
   }
 
-  // tiros do player
+  // tiros do player vs inimigos e blocos (igual antes)
   for (const pb of playerBullets) {
     if (!pb.alive) continue;
 
-    // vs inimigos
     for (const e of enemies) {
       if (!e.alive) continue;
       const hit = Math.hypot(pb.x - e.x, pb.y - e.y) < (e.radius + 6);
@@ -395,7 +418,6 @@ function updateCollisions(dt) {
     }
     if (!pb.alive) continue;
 
-    // vs blocos
     for (const k of blocks) {
       if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size || 40)/2;
@@ -429,7 +451,6 @@ function updateCollisions(dt) {
     }
   }
 
-  // morte do player → pendencia da conquista
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
     player.respawnTimer = 2.5;
@@ -438,7 +459,7 @@ function updateCollisions(dt) {
   }
 }
 
-/* ---------- Respawn Player (concede "Coragem...") ---------- */
+/* ---------- Respawn Player ---------- */
 function updateRespawn(dt) {
   if (!player.alive) {
     player.respawnTimer -= dt;
@@ -448,7 +469,7 @@ function updateRespawn(dt) {
       showDeathMsg(false);
       if (achievements.bravePending && !achievements.brave && player.level > 10) {
         achievements.bravePending = false; achievements.brave = true;
-        xpMult = 1.25;
+        updateXpMult(); // atualiza com bônus de conquista
         flashEvent('Você obteve a conquista "Coragem dos Fracos" (+25% XP)');
         pushAchievementBanner("🏅 Coragem dos Fracos (+25% XP)", 3000);
       }
@@ -458,10 +479,11 @@ function updateRespawn(dt) {
 
 /* ---------- Quests (UI lateral) ---------- */
 const questsDiv = document.getElementById("quests");
+const rebornQuest = { started:false, completed:false, requiredLevel:25 };
 function renderQuests() {
   if (!questsDiv) return;
-  const started = player.level >= 10 || rebornQuest.started;
-  const done = rebornQuest.completed;
+  const started = player.level >= 10 || rebornQuest.started || player.rebornCount > 0;
+  const done = player.rebornCount > 0 || rebornQuest.completed;
   const active = started && !done;
   const statusDot = done ? "done" : (active ? "active" : "");
   questsDiv.innerHTML = `
@@ -470,20 +492,20 @@ function renderQuests() {
       <div class="quest-dot ${statusDot}"></div>
       <div>
         <div><b>Reborn System</b></div>
-        <div class="small">${done ? "Concluída" : (active ? "Progrida até o Lv 25 para desbloquear" : "Será liberada no Lv 10")}</div>
+        <div class="small">
+          ${player.rebornCount>=1 ? "Concluída (você já renasceu)" :
+            (active ? "Progrida até o Lv 25 para desbloquear" : "Será liberada no Lv 10")}
+        </div>
       </div>
     </div>`;
 }
 
-/* ---------- Reborn System (UI + lógica) ---------- */
+/* ---------- Reborn Panel ---------- */
 const rebornBtn = document.getElementById("openReborn");
 const rebornPanel = document.getElementById("rebornPanel");
-
-const rebornQuest = { started:false, completed:false, requiredLevel:25 };
 let rebornPanelState = "status"; // "status" | "choose"
 
 rebornBtn?.addEventListener("click", () => toggleReborn());
-
 function toggleReborn(force) {
   if (!rebornPanel) return;
   const show = (typeof force === "boolean") ? force : (rebornPanel.style.display !== "block");
@@ -493,13 +515,19 @@ function toggleReborn(force) {
 function renderRebornPanel() {
   if (!rebornPanel) return;
 
-  const eligible = player.level >= rebornQuest.requiredLevel && !rebornQuest.completed;
-  const current = `<div class="reborn-row">Seu nível atual: <b>${player.level}</b> • Necessário: <b>${rebornQuest.requiredLevel}</b></div>`;
-  const rebornLabel = `<div class="reborn-row"><span class="reborn-big ${eligible ? "glow" : ""}">${eligible ? "REBORN" : "REBORN"}</span></div>`;
-  const tip = !rebornQuest.completed
-    ? `<div class="small" style="margin-top:6px;opacity:${eligible?1:0.75};">${eligible ? "Clique abaixo para renascer." : "Continue evoluindo para liberar o Reborn."}</div>`
-    : `<div class="small" style="margin-top:6px;">Você já renasceu (${player.rebornClass || "-"})</div>`;
+  const maxReached = (player.rebornCount || 0) >= 3;
+  const eligible = (player.level >= rebornQuest.requiredLevel) && !maxReached;
+  const current = `<div class="reborn-row">Seu nível atual: <b>${player.level}</b> • Necessário: <b>${rebornQuest.requiredLevel}</b> • Reborns: <b>${player.rebornCount}/3</b></div>`;
+  const rebornLabel = `<div class="reborn-row"><span class="reborn-big ${eligible ? "glow" : ""}">REBORN</span></div>`;
+  const tip = maxReached
+    ? `<div class="small" style="margin-top:6px;">Limite de Reborns atingido (3/3). Você já tem +75% XP do Reborn.</div>`
+    : (!eligible
+        ? `<div class="small" style="margin-top:6px;opacity:.85;">Continue evoluindo para liberar o Reborn.</div>`
+        : (player.rebornCount===0
+            ? `<div class="small" style="margin-top:6px;">Clique em prosseguir para escolher sua árvore (DPS ou TANK).</div>`
+            : `<div class="small" style="margin-top:6px;">Prossegua para ganhar +25% XP (apenas multiplicador nas próximas renascenças).</div>`));
 
+  // status ou escolha
   if (rebornPanelState === "status") {
     rebornPanel.innerHTML = `
       <h3>Reborn System</h3>
@@ -512,19 +540,25 @@ function renderRebornPanel() {
       </div>`;
     document.getElementById("closeReborn")?.addEventListener("click", () => toggleReborn(false));
     const act = document.getElementById("rebornAction");
-    if (act && eligible) act.addEventListener("click", () => { rebornPanelState = "choose"; renderRebornPanel(); });
+    if (act && eligible) {
+      if (player.rebornCount === 0) {
+        act.addEventListener("click", () => { rebornPanelState = "choose"; renderRebornPanel(); });
+      } else {
+        act.addEventListener("click", () => confirmReborn(null)); // apenas XP mult
+      }
+    }
   } else {
-    // Escolha de classe
+    // Escolha de classe (apenas no 1º Reborn)
     rebornPanel.innerHTML = `
       <h3>Escolha sua nova árvore</h3>
       <div class="choice-grid">
         <div class="choice" id="pickDPS">
           <b>DPS</b>
-          <div class="small">• Multiplicador de dano de projétil x1.25<br>• Acesso a futuros upgrades focados em dano</div>
+          <div class="small">• Multiplicador de projétil x1.25<br>• <u>Body Damage fica desativado</u> após o Reborn (exclusivo de TANK)</div>
         </div>
         <div class="choice" id="pickTANK">
           <b>TANK</b>
-          <div class="small">• 25% de redução de dano adicional<br>• Nova barra de vida (Escudo) consumida antes da vida<br>• Sua defesa é 25% mais efetiva no escudo</div>
+          <div class="small">• +25% de redução de dano adicional<br>• Escudo = 60% do seu HP (consumido antes da vida)<br>• Defesa é 25% mais efetiva no escudo<br>• Body Damage permanece disponível</div>
         </div>
       </div>
       <div class="reborn-row">
@@ -536,14 +570,25 @@ function renderRebornPanel() {
   }
 }
 function confirmReborn(cls) {
-  // aplica reset e bônus da classe
+  const previousCount = player.rebornCount || 0;
   doReborn(cls, BASES, getSafeZones());
-  rebornQuest.completed = true;
-  flashEvent(`Reborn concluído! Nova árvore: ${cls}`);
+
+  // Atualiza multiplicadores depois do Reborn
+  updateXpMult();
   playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
-  rebornPanelState = "status";
+
+  // Mensagem diferente se foi 1º Reborn (com escolha) ou somente XP
+  if (previousCount === 0) {
+    flashEvent(`Reborn concluído! Nova árvore: ${cls}`);
+    rebornQuest.completed = true;
+    rebornPanelState = "status";
+  } else {
+    flashEvent(`Reborn ${player.rebornCount}/3: +25% XP total agora +${player.rebornCount*25}%`);
+  }
+
   renderRebornPanel();
   renderQuests();
+  updateHUD();
 }
 
 /* ---------- Render ---------- */
@@ -580,11 +625,11 @@ function draw() {
   ctx.fillStyle = "#202020"; ctx.fillRect(0,0,viewW,viewH);
   drawGrid(); drawSafeZones(); drawBlocks(ctx, cam); drawEnemies(ctx, cam); drawPlayerBullets(ctx, cam); drawPlayer(); drawAchievementOverlays();
 
-  // Reforça estado do botão Reborn (brilho quando disponível)
   if (rebornBtn) {
-    const eligible = player.level >= rebornQuest.requiredLevel && !rebornQuest.completed;
+    const maxReached = (player.rebornCount || 0) >= 3;
+    const eligible = (player.level >= rebornQuest.requiredLevel) && !maxReached;
     rebornBtn.className = eligible ? "glow" : "";
-    rebornBtn.title = eligible ? "Pronto para renascer!" : "Progrida até o nível 25";
+    rebornBtn.title = eligible ? "Pronto para renascer!" : (maxReached ? "Limite de Reborns atingido" : "Progrida até o nível 25");
   }
 }
 
@@ -595,7 +640,6 @@ function update() {
   const dt = Math.min(0.033, (now - lastTime)/1000);
   lastTime = now;
 
-  // Atualiza início da quest quando chegar ao 10
   if (!rebornQuest.started && player.level >= 10) {
     rebornQuest.started = true;
   }
@@ -623,4 +667,6 @@ window.addEventListener("resize", () => {
 });
 
 /* ---------- Start ---------- */
-initGame(); gameLoop();
+initGame();
+updateXpMult(); // inicializa multiplicador de XP
+gameLoop();

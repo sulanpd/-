@@ -1,37 +1,31 @@
 /* ========================================================================
- * player.js
- * Define o objeto player, funções de stats, XP e auxiliares.
- * Com marcos de 10 pontos (Dano/Defesa/Velocidade) e Reborn System.
+ * player.js — com Reborn Count, XP Mult por Reborn e bloqueio de Body p/ DPS
  * ===================================================================== */
 export const player = {
   x: 0, y: 0, radius: 28, color: "#4ccfff",
   alive: true, hp: 100, maxHp: 100,
   level: 1, xp: 0, xpToNext: 100, points: 0,
 
-  // stats derivados
   dmg: 25, bodyDmg: 10, def: 0, speed: 3.2, mob: 1.0, regen: 0,
 
-  // debuffs/efeitos
   freezeTimer: 0, slowMult: 1, defDebuff: 0, circleTimer: 0,
 
-  // skill tree
   skill: { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 },
 
-  // marcos de 10 pontos
   milestones: { dmg10:false, def10:false, spd10:false },
-  blockDmgMult: 1.0,  // +20% vs blocos (marco de dano)
-  extraDR: 0.0,       // +20% DR extra (marco de defesa)
-  ignoreChance: 0.0,  // 10% de chance de ignorar 1 dano (marco de velocidade)
+  blockDmgMult: 1.0,
+  extraDR: 0.0,
+  ignoreChance: 0.0,
 
   // Reborn System
-  hasReborn: false,         // já renasceu pelo menos 1x
+  hasReborn: false,
   rebornClass: null,        // "DPS" | "TANK" | null
+  rebornCount: 0,           // 0..3
   rebornDamageMult: 1.0,    // DPS: 1.25
   rebornExtraDR: 0.0,       // TANK: 0.25
-  // Escudo (TANK): barra consumida antes da vida
   shield: 0,
   shieldMax: 0,
-  shieldDRBoost: 0.25,      // redução é 25% mais efetiva no escudo
+  shieldDRBoost: 0.25,      // 25% mais efetivo no escudo
 
   respawnTimer: 0
 };
@@ -61,7 +55,6 @@ export function playerBaseStats(BASES) {
 
   if (!player.xpToNext) player.xpToNext = xpToNext(player.level);
 
-  // marcos 10+
   player.milestones.dmg10 = (s.dmg || 0) >= 10;
   player.milestones.def10 = (s.def || 0) >= 10;
   player.milestones.spd10 = (s.speed || 0) >= 10;
@@ -70,10 +63,9 @@ export function playerBaseStats(BASES) {
   player.extraDR      = player.milestones.def10 ? 0.20 : 0.0;
   player.ignoreChance = player.milestones.spd10 ? 0.10 : 0.0;
 
-  // Se TANK, atualiza escudo para ser proporcional à nova vida
+  // Recalcula escudo TANK = 60% do HP atual
   if (player.rebornClass === "TANK") {
     const newShieldMax = Math.round(player.maxHp * 0.6);
-    // preserva proporção do escudo atual quando stats mudam
     const pct = player.shieldMax > 0 ? (player.shield / player.shieldMax) : 1;
     player.shieldMax = newShieldMax;
     player.shield = Math.max(0, Math.min(newShieldMax, Math.round(newShieldMax * pct)));
@@ -85,17 +77,13 @@ export function getPlayerDefPercent() {
   const base = Math.max(0, Math.min(0.95, player.def || 0));
   const debuff = Math.max(0, Math.min(0.9, player.defDebuff || 0));
   const withReborn = Math.max(0, Math.min(0.95, (base - debuff)));
-  // aplica DR extra global (marcos/traits) fora desta função no game.js quando necessário
   return withReborn;
 }
-
-// Defesa efetiva para o ESCUDO do TANK (25% mais efetiva)
 export function getShieldDefPercent() {
   let d = getPlayerDefPercent();
-  d = Math.min(0.95, d * (1 + (player.shieldDRBoost || 0))); // 25% mais efetivo
+  d = Math.min(0.95, d * (1 + (player.shieldDRBoost || 0)));
   return d;
 }
-
 export function getPlayerBonusXP(amount) { return amount; }
 
 export function resetPlayer(safeZones) {
@@ -112,7 +100,6 @@ export function resetPlayer(safeZones) {
   player.circleTimer = 0;
 }
 
-// Retorna resumo dos marcos atuais (para HUD)
 export function getPlayerMilestoneSummary() {
   return {
     dmg10: player.milestones.dmg10,
@@ -125,16 +112,25 @@ export function getPlayerMilestoneSummary() {
 }
 
 /* =========================
- * Funções do Reborn System
+ * Reborn System
  * ========================= */
 export function doReborn(classChoice, BASES, safeZones) {
-  // Reinicia progressão "como se tivesse começado novamente"
+  // Incrementa contador (máx 3)
+  player.rebornCount = Math.min(3, (player.rebornCount || 0) + 1);
   player.hasReborn = true;
-  player.rebornClass = classChoice;         // "DPS" | "TANK"
+
+  // Apenas no 1º Reborn escolhe classe; nos próximos, mantém
+  if (player.rebornCount === 1) {
+    player.rebornClass = classChoice; // "DPS" | "TANK"
+  }
+
+  // Reset progressão
   player.level = 1;
   player.xp = 0;
   player.xpToNext = xpToNext(1);
   player.points = 0;
+
+  // Zera árvore (após Reborn, Body será bloqueado se DPS; liberado se TANK)
   player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
   player.milestones = { dmg10:false, def10:false, spd10:false };
   player.blockDmgMult = 1.0;
@@ -142,18 +138,17 @@ export function doReborn(classChoice, BASES, safeZones) {
   player.ignoreChance = 0.0;
 
   // Efeitos de classe
-  if (classChoice === "DPS") {
+  if (player.rebornClass === "DPS") {
     player.rebornDamageMult = 1.25;
     player.rebornExtraDR = 0.0;
     player.shield = 0; player.shieldMax = 0;
-  } else if (classChoice === "TANK") {
+  } else if (player.rebornClass === "TANK") {
     player.rebornDamageMult = 1.0;
-    player.rebornExtraDR = 0.25; // 25% redução adicional
+    player.rebornExtraDR = 0.25;
     player.shieldMax = Math.round(player.maxHp * 0.6);
     player.shield = player.shieldMax;
   }
 
-  // Recalcula stats baseados na árvore resetada
   playerBaseStats(BASES);
   resetPlayer(safeZones);
 }
