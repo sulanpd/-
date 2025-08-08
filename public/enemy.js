@@ -1,62 +1,50 @@
 import { player } from "./player.js";
 import { spawnProjectile } from "./projectiles.js";
-import { getSafeZones } from "./game.js";
 
 export const enemies = [];
 
-export function spawnEnemy(type, x, y) {
-  const enemy = {
-    x, y,
-    radius: type === "boss" ? 50 : 25,
-    color: type === "orange" ? "#ff8000" : type === "boss" ? "#ff0000" : "#ff4444",
-    hp: type === "boss" ? 2000 : type === "orange" ? 200 : 100,
-    maxHp: type === "boss" ? 2000 : type === "orange" ? 200 : 100,
-    speed: type === "boss" ? 1.5 : type === "orange" ? 2.2 : 2.5,
-    dmg: type === "boss" ? 40 : type === "orange" ? 15 : 10,
-    alive: true,
-    type,
-    cooldown1: 0,
-    cooldown2: 0,
-    phase: 1 // fases do boss
-  };
-  enemies.push(enemy);
-}
-
-export function spawnWave(level, mapW, mapH) {
-  const safeZones = getSafeZones();
-  for (let i = 0; i < 5; i++) {
-    let type = "normal";
-    if (level >= 15 && Math.random() < 0.3) type = "orange";
-    const pos = randomPosOutsideSafe(mapW, mapH, safeZones);
-    spawnEnemy(type, pos.x, pos.y);
-  }
-  if (level >= 45 && !enemies.find(e => e.type === "boss")) {
-    const pos = randomPosOutsideSafe(mapW, mapH, safeZones);
-    spawnEnemy("boss", pos.x, pos.y);
-  }
-}
-
-function randomPosOutsideSafe(mapW, mapH, safeZones) {
-  let pos;
-  let inSafe;
+function randomPosOutsideSafe(mapW, mapH, safeZones, extra = 50) {
+  let pos, inSafe;
   do {
     pos = { x: Math.random() * mapW, y: Math.random() * mapH };
-    inSafe = safeZones.some(s => Math.hypot(pos.x - s.x, pos.y - s.y) < s.r + 50);
+    inSafe = safeZones.some(s => Math.hypot(pos.x - s.x, pos.y - s.y) < s.r + extra);
   } while (inSafe);
   return pos;
 }
 
-export function updateEnemies(dt) {
-  const safeZones = getSafeZones();
+export function spawnEnemy(type, mapW, mapH, safeZones) {
+  const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
+  const enemy = {
+    x: pos.x, y: pos.y,
+    type,
+    radius: type === "boss" ? 50 : 25,
+    color:  type === "boss" ? "#ff0000" : (type === "orange" ? "#ff8000" : "#ff4444"),
+    maxHp:  type === "boss" ? 2000 : (type === "orange" ? 200 : 100),
+    hp:     type === "boss" ? 2000 : (type === "orange" ? 200 : 100),
+    speed:  type === "boss" ? 1.5  : (type === "orange" ? 2.2 : 2.5),
+    dmg:    type === "boss" ? 40   : (type === "orange" ? 15 : 10),
+    alive: true,
+    // Boss state
+    phase: 1,
+    cooldown1: 0,
+    cooldown2: 0,
+    dmgReduction: 0
+  };
+  enemies.push(enemy);
+  return enemy;
+}
 
+export function spawnBoss(mapW, mapH, safeZones) {
+  return spawnEnemy("boss", mapW, mapH, safeZones);
+}
+
+export function updateEnemies(dt, safeZones) {
   for (const e of enemies) {
     if (!e.alive) continue;
 
-    // Boss fases
+    // Fases do boss
     if (e.type === "boss") {
-      if (e.hp <= e.maxHp * 0.6 && e.phase < 2) {
-        e.phase = 2;
-      }
+      if (e.hp <= e.maxHp * 0.6 && e.phase < 2) e.phase = 2;
       if (e.hp <= e.maxHp * 0.4 && e.phase < 3) {
         e.phase = 3;
         e.speed *= 1.3;
@@ -64,38 +52,43 @@ export function updateEnemies(dt) {
       }
     }
 
-    // Movimento e IA
-    const distPlayer = Math.hypot(player.x - e.x, player.y - e.y);
+    // IA: só persegue se player NÃO estiver em safe zone
     const inSafe = safeZones.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.r);
+    const distP = Math.hypot(player.x - e.x, player.y - e.y);
 
-    if (!inSafe && distPlayer < 500) {
-      const dx = player.x - e.x;
-      const dy = player.y - e.y;
-      const len = Math.max(1, Math.hypot(dx, dy));
-      e.x += (dx / len) * e.speed * 60 * dt;
-      e.y += (dy / len) * e.speed * 60 * dt;
+    if (!inSafe && distP < (e.type === "boss" ? 1000 : (e.type === "orange" ? 800 : 650))) {
+      const d = Math.max(1, distP);
+      e.x += ((player.x - e.x) / d) * e.speed * 60 * dt;
+      e.y += ((player.y - e.y) / d) * e.speed * 60 * dt;
     }
 
-    // Boss skills
+    // Contato (dano simples + body damage do jogador)
+    if (distP < (player.radius || 28) + e.radius) {
+      player.hp -= e.dmg * dt;
+      e.hp -= Math.max(1, player.bodyDmg || 0) * dt;
+      if (e.hp <= 0) e.alive = false;
+    }
+
+    // Skills do boss
     if (e.type === "boss") {
       e.cooldown1 -= dt;
       e.cooldown2 -= dt;
 
-      if (e.phase === 1 && e.cooldown1 <= 0) {
-        spawnProjectile(e.x, e.y, player.x, player.y, 200, 0, "trap");
-        e.cooldown1 = 6;
-      }
+      // respeita intervalo mínimo entre skills: nunca as duas “ao mesmo tempo”
+      const canCastSkill1 = e.cooldown1 <= 0 && distP < 900;
+      const canCastSkill2 = e.phase >= 2 && e.cooldown2 <= 0 && distP < 900;
 
-      if (e.phase >= 2) {
-        if (e.cooldown2 <= 0) {
-          spawnProjectile(e.x, e.y, player.x, player.y, 150, 0, "circle");
-          e.cooldown2 = 5;
-        }
-      }
-
-      if (e.phase === 3 && e.cooldown1 <= 0) {
+      if (canCastSkill1 && (!canCastSkill2 || Math.random() < 0.6)) {
+        // Skill 1: projétil que prende 1.5s (trap) — CD 6s (ou 3s na fase 3)
         spawnProjectile(e.x, e.y, player.x, player.y, 200, 0, "trap");
-        e.cooldown1 = 3;
+        e.cooldown1 = (e.phase >= 3) ? 3 : 6;
+        // trava 1.5s antes da próxima skill
+        e.cooldown2 = Math.max(e.cooldown2, 1.5);
+      } else if (canCastSkill2) {
+        // Skill 2: projétil que cria círculo (HP 250, -50% spd, -25% def) — CD 5s
+        spawnProjectile(e.x, e.y, player.x, player.y, 150, 0, "circle");
+        e.cooldown2 = 5;
+        e.cooldown1 = Math.max(e.cooldown1, 1.5);
       }
     }
   }
@@ -104,18 +97,16 @@ export function updateEnemies(dt) {
 export function drawEnemies(ctx, cam) {
   for (const e of enemies) {
     if (!e.alive) continue;
-
     ctx.fillStyle = e.color;
     ctx.beginPath();
     ctx.arc(e.x - cam.x, e.y - cam.y, e.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Barra de vida
     const w = e.radius * 2;
     const hpPct = Math.max(0, e.hp / e.maxHp);
     ctx.fillStyle = "#000";
-    ctx.fillRect(e.x - cam.x - w / 2, e.y - cam.y - e.radius - 10, w, 5);
+    ctx.fillRect(e.x - cam.x - w/2, e.y - cam.y - e.radius - 10, w, 5);
     ctx.fillStyle = "#0f0";
-    ctx.fillRect(e.x - cam.x - w / 2, e.y - cam.y - e.radius - 10, w * hpPct, 5);
+    ctx.fillRect(e.x - cam.x - w/2, e.y - cam.y - e.radius - 10, w * hpPct, 5);
   }
 }
