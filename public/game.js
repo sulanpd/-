@@ -57,8 +57,8 @@ function drawSafeZones() {
 const keys = new Set();
 let isShooting = false;
 let shootCD = 0;              // cooldown em segundos
-const FIRE_RATE = 0.18;       // 0.18s por tiro ~ 5.5 tiros/s
-let mouseWX = 0, mouseWY = 0; // posição do mouse em coordenadas do mundo
+const FIRE_RATE = 0.18;       // ~5.5 tiros/s
+let mouseWX = 0, mouseWY = 0; // posição do mouse no mundo
 
 function updateMouseWorld(e){
   const rect = canvas.getBoundingClientRect();
@@ -219,10 +219,11 @@ function upgradeSkill(key) {
 let score = 0;
 let level10Shown = false;
 
-// conquistas
+// conquistas (ícones e buffs)
 const achievements = {
-  brave: false,   // Coragem dos Fracos
-  power8k: false  // Um Poder de Mais de 8 mil
+  brave: false,       // Coragem dos Fracos (aplicada após respawn)
+  bravePending: false,
+  power8k: false      // Um Poder de Mais de 8 mil
 };
 let xpMult = 1.0;
 let playerDamageMult = 1.0;
@@ -241,10 +242,53 @@ function addXP(v) {
       playerDamageMult = 1.10;         // +10% dano
       setProjectileRangeMult(1.35);    // +35% alcance
       flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
+      pushAchievementBanner("⚡ Um Poder de Mais de 8 mil", 3000);
     }
 
     if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Posso sentir sua presença"); }
     flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
+  }
+}
+
+/* ===== Banners de Conquista (3s) e Ícones permanentes no canto ===== */
+const activeBanners = []; // {text, until}
+function pushAchievementBanner(text, ms=3000){
+  activeBanners.push({ text, until: performance.now() + ms });
+}
+function drawAchievementBanners(){
+  const now = performance.now();
+  const y0 = 20;
+  let y = y0;
+  for (let i=activeBanners.length-1; i>=0; i--){
+    const b = activeBanners[i];
+    if (now > b.until) { activeBanners.splice(i,1); continue; }
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#111a";
+    ctx.fillRect(viewW/2 - 180, y, 360, 34);
+    ctx.strokeStyle="#44f"; ctx.strokeRect(viewW/2 - 180, y, 360, 34);
+    ctx.fillStyle="#fff"; ctx.font="14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(b.text, viewW/2, y+17);
+    ctx.restore();
+    y += 40;
+  }
+}
+function drawAchievementIcons(){
+  const icons = [];
+  if (achievements.brave)  icons.push({emoji:"🏅", title:"+25% XP"});
+  if (achievements.power8k) icons.push({emoji:"⚡", title:"+10% DMG + Alcance"});
+
+  const x0 = 10, y0 = 10, size = 28, pad = 6;
+  let x = x0;
+  for (const ic of icons) {
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle="#1e1e1e"; ctx.fillRect(x, y0, size, size);
+    ctx.strokeStyle="#66f"; ctx.strokeRect(x, y0, size, size);
+    ctx.font="20px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(ic.emoji, x + size/2, y0 + size/2 + 1);
+    ctx.restore();
+    x += size + pad;
   }
 }
 
@@ -317,7 +361,7 @@ function updateCollisions(dt) {
     player.hp = Math.min(player.maxHp, player.hp + regen * player.maxHp * dt);
   }
 
-  // Player vs Blocks (contato)
+  // Player vs Blocks (contato) + DR e XP por nível
   for (const b of blocks) {
     if (!b.alive) continue;
     const t = BLOCK_TYPES[b.type];
@@ -328,12 +372,16 @@ function updateCollisions(dt) {
       currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
       const def = getPlayerDefPercent();
       player.hp -= t.dmg * (1 - def) * dt * 10;
-      b.hp -= Math.max(1, player.bodyDmg) * playerDamageMult * dt;
+
+      // dano corpo-a-corpo sofre DR do bloco
+      const eff = Math.max(0, 1 - (b.dmgReduce || 0));
+      b.hp -= Math.max(1, player.bodyDmg) * playerDamageMult * eff * dt;
+
       if (b.hp <= 0) {
         b.alive = false;
-        const baseXP = t.xp || 0;
-        addXP(getPlayerBonusXP(baseXP));
-        score += Math.floor(baseXP);
+        const xpGain = b.xpReward || (t.xp || 0);
+        addXP(getPlayerBonusXP(xpGain));
+        score += Math.floor(xpGain);
       }
     }
   }
@@ -352,24 +400,28 @@ function updateCollisions(dt) {
         pb.alive = false;
         if (e.hp <= 0) {
           e.alive = false;
-          addXP(getPlayerBonusXP(e.xpReward || 10));
-          score += Math.floor((e.xpReward || 10) * 0.5);
+          const xp = e.xpReward || 10;
+          addXP(getPlayerBonusXP(xp));
+          score += Math.floor(xp * 0.5);
           flashEvent(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP");
+          pushAchievementBanner(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP", 1200);
         }
         break;
       }
     }
     if (!pb.alive) continue;
 
-    // Blocos
+    // Blocos (considera DR do bloco)
     for (const k of blocks) {
       if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size || 40) / 2;
       if (Math.abs(pb.x - k.x) <= half + 6 && Math.abs(pb.y - k.y) <= half + 6) {
-        k.hp -= pb.damage; pb.alive = false;
+        const eff = Math.max(0, 1 - (k.dmgReduce || 0));
+        k.hp -= pb.damage * eff;
+        pb.alive = false;
         if (k.hp <= 0) {
           k.alive = false;
-          const xp = BLOCK_TYPES[k.type]?.xp || 0;
+          const xp = k.xpReward || (BLOCK_TYPES[k.type]?.xp || 0);
           addXP(getPlayerBonusXP(xp)); score += Math.floor(xp);
         }
         break;
@@ -388,22 +440,20 @@ function updateCollisions(dt) {
       e.hp -= dmgToEnemy;
       if (e.hp <= 0) {
         e.alive = false;
-        addXP(getPlayerBonusXP(e.xpReward || 10));
-        score += Math.floor((e.xpReward || 10) * 0.5);
+        const xp = e.xpReward || 10;
+        addXP(getPlayerBonusXP(xp)); score += Math.floor(xp * 0.5);
       }
     }
   }
 
-  // Morte do player (checa conquista "Coragem dos Fracos")
+  // Morte do player → apenas marca conquista "Coragem..." como pendente
   if (player.hp <= 0 && player.alive) {
     player.alive = false;
     player.respawnTimer = 2.5;
     showDeathMsg(true);
 
     if (!achievements.brave && player.level > 10) {
-      achievements.brave = true;
-      xpMult = 1.25; // +25% XP de todas as fontes
-      flashEvent('Você obteve a conquista "Coragem dos Fracos" (+25% XP)');
+      achievements.bravePending = true; // só aplicará no respawn
     }
   }
 }
@@ -415,7 +465,75 @@ function updateRespawn(dt) {
       resetPlayer(getSafeZones());
       playerBaseStats(BASES);
       showDeathMsg(false);
+
+      // Concede "Coragem dos Fracos" no momento do respawn
+      if (achievements.bravePending && !achievements.brave && player.level > 10) {
+        achievements.bravePending = false;
+        achievements.brave = true;
+        xpMult = 1.25; // +25% XP
+        flashEvent('Você obteve a conquista "Coragem dos Fracos" (+25% XP)');
+        pushAchievementBanner("🏅 Coragem dos Fracos (+25% XP)", 3000);
+      }
     }
+  }
+}
+
+/* ===================== Respawns (Timers + Limites) ===================== */
+const LIMITS = { basic: 12, orange: 6, boss: 1, blocks: 80 };
+const RESPAWN = { basic: 40, orange: 120, boss: 600, block: 2 }; // s
+let accBasic = 0, accOrange = 0, accBoss = 0, accBlock = 0;
+
+function updateRespawns(dt) {
+  // Blocos — 1 a cada 2s se < 80
+  accBlock += dt;
+  if (accBlock >= RESPAWN.block) {
+    accBlock -= RESPAWN.block;
+    const aliveBlocks = blocks.filter(b => b.alive).length;
+    if (aliveBlocks < LIMITS.blocks) {
+      const types = ["yellow","blue","purple"];
+      const type = types[(Math.random()*types.length)|0];
+      spawnBlock(type, MAP_W, MAP_H, getSafeZones());
+    }
+  }
+
+  // Básicos — 1 a cada 40s se < 12
+  accBasic += dt;
+  if (accBasic >= RESPAWN.basic) {
+    accBasic -= RESPAWN.basic;
+    const aliveBasics = enemies.filter(e => e.alive && e.type === "basic").length;
+    if (aliveBasics < LIMITS.basic) {
+      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
+    }
+  }
+
+  // Laranjas — 1 a cada 120s se < 6 e lvl >= 15
+  if (player.level >= 15) {
+    accOrange += dt;
+    if (accOrange >= RESPAWN.orange) {
+      accOrange -= RESPAWN.orange;
+      const aliveOranges = enemies.filter(e => e.alive && e.type === "orange").length;
+      if (aliveOranges < LIMITS.orange) {
+        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
+      }
+    }
+  } else {
+    accOrange = 0;
+  }
+
+  // Boss — 1 a cada 10 min, lvl >= 45, 1 vivo no máximo
+  if (player.level >= 45) {
+    accBoss += dt;
+    if (accBoss >= RESPAWN.boss) {
+      accBoss = 0;
+      const aliveBoss = enemies.some(e => e.alive && e.type === "boss");
+      if (!aliveBoss) {
+        spawnBoss(MAP_W, MAP_H, getSafeZones());
+        flashEvent("⚠️ Boss apareceu!");
+        pushAchievementBanner("⚠️ Boss apareceu!", 2000);
+      }
+    }
+  } else {
+    accBoss = 0;
   }
 }
 
@@ -446,6 +564,11 @@ function drawPlayer() {
   }
 }
 
+function drawAchievementOverlays(){
+  drawAchievementIcons();
+  drawAchievementBanners();
+}
+
 function draw() {
   ctx.fillStyle = "#202020"; ctx.fillRect(0, 0, viewW, viewH);
   drawGrid();
@@ -454,6 +577,7 @@ function draw() {
   drawEnemies(ctx, cam);
   drawPlayerBullets(ctx, cam);
   drawPlayer();
+  drawAchievementOverlays();
 }
 
 /* ===================== Loop ===================== */
