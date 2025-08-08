@@ -1,10 +1,10 @@
-import { player, resetPlayer, playerBaseStats, getPlayerDefPercent, getPlayerRegen, getPlayerBonusXP, xpToNext, shoot, updateShots, drawShots } from "./player.js";
+import { player, resetPlayer, playerBaseStats, getPlayerDefPercent, getPlayerRegen, getPlayerBonusXP, xpToNext } from "./player.js";
 import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies } from "./enemy.js";
-import { blocks, BLOCK_TYPES, spawnBlock } from "./blocks.js";
-import { clamp } from "./utils.js";
+import { blocks, BLOCK_TYPES, spawnBlock, updateBlocks, damageBlockByProjectile, drawBlocks } from "./blocks.js";
 import { projectiles, circles, spawnProjectile, updateProjectiles, updateCircles, drawProjectiles, drawCircles } from "./projectiles.js";
+import { clamp } from "./utils.js";
 
-// ====== CANVAS / MAPA / CÂMERA ======
+// ====== CANVAS ======
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
@@ -18,13 +18,14 @@ let MAP_H = viewH * 3;
 
 const cam = { x: 0, y: 0 };
 
-// ====== BASES DO PLAYER ======
+// ====== BASES ======
 const BASES = {
   BASE_HP:    100,
   BASE_DMG:   25,
   BASE_DEF:   0,
   BASE_SPEED: 3.2,
-  BASE_MOB:   1.0
+  BASE_MOB:   1.0,
+  BASE_BODY:  10
 };
 playerBaseStats(BASES);
 
@@ -36,31 +37,23 @@ function getSafeZones() {
     { x: MAP_W * 0.50, y: MAP_H * 0.75, r: 160 }
   ];
 }
-
 function drawSafeZones() {
-  ctx.strokeStyle = "rgba(0,255,0,0.4)";
-  ctx.lineWidth = 3;
-  for (const z of getSafeZones()) {
+  ctx.strokeStyle = "rgba(0,255,0,0.3)";
+  ctx.lineWidth = 2;
+  for (const s of getSafeZones()) {
     ctx.beginPath();
-    ctx.arc(z.x - cam.x, z.y - cam.y, z.r, 0, Math.PI * 2);
+    ctx.arc(s.x - cam.x, s.y - cam.y, s.r, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
 
 // ====== INPUT ======
 const keys = new Set();
-window.addEventListener("keydown", (e) => {
+window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key === "Escape") toggleSkills(false);
+  if (e.key === " ") shoot();
 });
-window.addEventListener("keyup",   (e) => keys.delete(e.key.toLowerCase()));
-
-canvas.addEventListener("mousedown", e => {
-  const rect = canvas.getBoundingClientRect();
-  const tx = e.clientX - rect.left + cam.x;
-  const ty = e.clientY - rect.top + cam.y;
-  shoot(tx, ty);
-});
+window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 
 function handleInput(dt) {
   let vx = 0, vy = 0;
@@ -76,7 +69,6 @@ function handleInput(dt) {
 
   const slow = currentSlowFactor;
   const spd = player.speed * (1 - slow) * 60 * dt;
-
   player.x += vx * spd;
   player.y += vy * spd;
 
@@ -85,7 +77,17 @@ function handleInput(dt) {
   player.y = clamp(player.y, r, MAP_H - r);
 }
 
-// ====== SPAWN ======
+// ====== SHOOT ======
+let shootCooldown = 0;
+function shoot() {
+  if (shootCooldown > 0) return;
+  const mouseX = cam.x + viewW / 2;
+  const mouseY = cam.y + viewH / 2 - 50;
+  spawnProjectile(player.x, player.y, mouseX, mouseY, 12, player.dmg, "normal");
+  shootCooldown = 0.25;
+}
+
+// ====== INIT ======
 function initGame() {
   resetPlayer(getSafeZones());
   for (let i = 0; i < 50; i++) { // spawn dobrado
@@ -101,124 +103,67 @@ function centerCameraOnPlayer() {
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
 }
 
-// ====== COLISÕES / COMBATE ======
+// ====== COMBATE / XP ======
 let score = 0;
 let currentSlowFactor = 0;
+let level10MsgShown = false;
 
-function updateCollisions(dt) {
+function updateGame(dt) {
   currentSlowFactor = 0;
 
+  // Regen
   const regenRate = getPlayerRegen();
   if (regenRate > 0 && player.alive) {
     player.hp = Math.min(player.maxHp, player.hp + regenRate * player.maxHp * dt);
   }
 
-  // colisão com blocos
-  for (const b of blocks) {
-    if (!b.alive) continue;
-    const t = BLOCK_TYPES[b.type];
-    if (!t) continue;
+  updateBlocks(dt);
+  updateEnemies(dt, getSafeZones());
+  updateProjectiles(dt);
+  updateCircles(dt);
 
-    const dx = b.x - player.x;
-    const dy = b.y - player.y;
-    const dist = Math.hypot(dx, dy);
-    const overlap = (t.size/2 + player.radius) - dist;
-
-    if (overlap > 0) {
-      currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
-
-      const def = getPlayerDefPercent();
-      const dmgTick = t.dmg * (1 - def) * dt * 10;
-      player.hp -= dmgTick;
-
-      b.hp -= Math.max(1, player.bodyDmg) * dt;
-
-      if (b.hp <= 0 && b.alive) {
-        b.alive = false;
-        const baseXP = t.xp || 0;
-        const gained = getPlayerBonusXP(baseXP);
-        addXP(gained);
-        score += Math.floor(baseXP);
-      }
-    }
-  }
-
-  if (player.hp <= 0 && player.alive) {
-    player.alive = false;
-    player.respawnTimer = 2.5;
-    showDeathMsg(true);
-  }
-}
-
-// ====== XP / LEVEL ======
-function addXP(amt) {
-  player.xp += amt;
+  // XP / Nível
   while (player.xp >= player.xpToNext) {
     player.xp -= player.xpToNext;
-    levelUp();
-  }
-}
+    player.level++;
+    player.points++;
+    player.xpToNext = xpToNext(player.level);
+    playerBaseStats(BASES);
 
-function levelUp() {
-  player.level += 1;
-  player.points += 1;
-  player.xpToNext = xpToNext(player.level);
-  playerBaseStats(BASES);
-  flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
-  if (player.level === 10) flashEvent("Posso sentir sua presença");
-}
-
-function updateRespawn(dt) {
-  if (!player.alive) {
-    player.respawnTimer -= dt;
-    if (player.respawnTimer <= 0) {
-      resetPlayer(getSafeZones());
-      playerBaseStats(BASES);
-      showDeathMsg(false);
+    if (player.level === 10 && !level10MsgShown) {
+      flashEvent("Posso sentir sua presença");
+      level10MsgShown = true;
+    }
+    if (player.level >= 15) spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
+    if (player.level >= 45 && !enemies.some(e => e.isBoss)) {
+      spawnBoss(MAP_W, MAP_H, getSafeZones());
     }
   }
-}
 
-// ====== HUD / SKILLS ======
-const hudHp     = document.getElementById("hp");
-const hudLvl    = document.getElementById("level");
-const hudScore  = document.getElementById("score");
-const spanPoints= document.getElementById("points");
-const xpbar     = document.getElementById("xpbar");
-const skillsDiv = document.getElementById("skills");
-const eventMsg  = document.getElementById("eventMsg");
-const deathMsg  = document.getElementById("deathMsg");
-
-function toggleSkills(force=false) {
-  const show = force === false ? (skillsDiv?.style.display !== "block") : force;
-  if (!skillsDiv) return;
-  skillsDiv.style.display = show ? "block" : "none";
-}
-
-function updateHUD() {
-  if (hudHp)   hudHp.textContent = `${Math.ceil(player.hp)}/${player.maxHp}`;
-  if (hudLvl)  hudLvl.textContent = player.level;
-  if (hudScore)  hudScore.textContent = score;
-  if (spanPoints) spanPoints.textContent = player.points;
-  if (xpbar) {
-    const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext));
-    xpbar.style.width = Math.floor(pct * 100) + "%";
-  }
+  if (shootCooldown > 0) shootCooldown -= dt;
 }
 
 function flashEvent(msg) {
+  const eventMsg = document.getElementById("eventMsg");
   if (!eventMsg) return;
   eventMsg.textContent = msg;
   eventMsg.style.display = "block";
-  setTimeout(() => { eventMsg.style.display = "none"; }, 3000);
-}
-
-function showDeathMsg(show) {
-  if (!deathMsg) return;
-  deathMsg.style.display = show ? "block" : "none";
+  setTimeout(() => eventMsg.style.display = "none", 3000);
 }
 
 // ====== DRAW ======
+function draw() {
+  ctx.fillStyle = "#202020";
+  ctx.fillRect(0, 0, viewW, viewH);
+  drawGrid();
+  drawSafeZones();
+  drawBlocks(ctx, cam);
+  drawEnemies(ctx, cam);
+  drawProjectiles(ctx, cam);
+  drawCircles(ctx, cam);
+  drawPlayer();
+}
+
 function drawGrid() {
   const gridSize = 64;
   ctx.strokeStyle = "#2a2a2a";
@@ -239,60 +184,29 @@ function drawGrid() {
   }
 }
 
-function draw() {
-  ctx.fillStyle = "#202020";
-  ctx.fillRect(0, 0, viewW, viewH);
-
-  drawGrid();
-  drawSafeZones();
-  drawEnemies(ctx, cam);
-  drawProjectiles(ctx, cam);
-  drawCircles(ctx, cam);
-  drawShots(ctx, cam);
-
-  // player
+function drawPlayer() {
   const pr = player.radius || 28;
   const sx = Math.floor(player.x - cam.x);
   const sy = Math.floor(player.y - cam.y);
+
   ctx.beginPath();
   ctx.arc(sx, sy, pr, 0, Math.PI * 2);
-  ctx.fillStyle = player.color;
+  ctx.fillStyle = player.color || "#4ccfff";
   ctx.fill();
-
-  if (player.maxHp) {
-    const w = 80, h = 8;
-    const hpPct = Math.max(0, Math.min(1, player.hp / player.maxHp));
-    ctx.fillStyle = "#000";
-    ctx.fillRect(sx - w/2, sy - pr - 18, w, h);
-    ctx.fillStyle = "#2ecc71";
-    ctx.fillRect(sx - w/2, sy - pr - 18, w * hpPct, h);
-    ctx.strokeStyle = "#111";
-    ctx.strokeRect(sx - w/2, sy - pr - 18, w, h);
-  }
 }
 
-// ====== UPDATE / LOOP ======
+// ====== LOOP ======
 let lastTime = performance.now();
-function update() {
+function gameLoop() {
   const now = performance.now();
   const dt = Math.min(0.033, (now - lastTime) / 1000);
   lastTime = now;
 
   if (player.alive) handleInput(dt);
-  updateCollisions(dt);
-  updateRespawn(dt);
-  updateShots(dt, MAP_W, MAP_H);
-  updateProjectiles(dt);
-  updateCircles(dt);
-  updateEnemies(dt, player, getSafeZones());
-
+  updateGame(dt);
   centerCameraOnPlayer();
-  updateHUD();
-}
-
-function gameLoop() {
-  update();
   draw();
+
   requestAnimationFrame(gameLoop);
 }
 
