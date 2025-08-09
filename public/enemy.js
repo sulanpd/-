@@ -69,7 +69,6 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
   const b = BASES[type];
   const lv = level ?? randomLevelForType(type);
   const sc = scaleByLevel(type, lv);
-enemy.enemyRank = enemy.enemyRank || "NonRank"; // padrão
   const e = {
     x: pos.x, y: pos.y, type, level: sc.lvl,
     radius: b.radius, color: b.color,
