@@ -365,7 +365,6 @@ for (const p of bossProjectiles) {
     // hit blocks
     for (const k of blocks){ if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size||40)/2;
-      const half = (BLOCK_TYPES[k.type]?.size||40)/2;
       if (Math.abs(p.x - k.x) <= half + rad && Math.abs(p.y - k.y) <= half + rad) { k.hp -= (p.type==="circle"? 35:28); k.recentHitTimer=1.0; p.alive=false; break; }
   }
 
