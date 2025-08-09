@@ -278,17 +278,27 @@ export function updateEnemies(dt, safeZones) {
       e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
     }
 
-    // Tiro de TODOS os inimigos (passam a lutar à distância; podem atirar em blocos também)//
-     //(não atiram em blocos)//
-    if (e.type==="orange" && target && targetType!=="block" ? distTarget < 700 : distTarget < 500) {
-      e.shootCd -= dt;
-      if (e.shootCd <= 0) {
-        e.shootCd = 1.2;
-        const tx = (target?.x ?? player.x), ty = (target?.y ?? player.y);
-        const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx,dy)||1;
-        const bulletDmg = Math.round(10 + e.dmg*0.4);
-        const spMult = e._projSpeedMult || 1;
-        shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13*spMult, vy:(dy/d)*13*spMult, life:2.2, alive:true, dmg: bulletDmg, from:e, stun:e._stunShot||0 });
+    // Tiro de TODOS os inimigos (agora todos atiram no alvo atual; prioridade: Player > Inimigos > Blocos)
+    if (target) {
+      const prof = FIRE_PROFILE[e.type] || FIRE_PROFILE.basic;
+      const inRange = distTarget < (STANDOFF[e.type] || 340) + 140; // margem para começar a atirar
+      e.shootCd = (e.shootCd || 0) - dt;
+      if (inRange && e.shootCd <= 0) {
+        e.shootCd = prof.cd;
+        const tx = target.x, ty = target.y;
+        const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx,dy) || 1;
+        const spMult = (e._projSpeedMult || 1);
+        const spd = (prof.speed * spMult);
+        const life = prof.life;
+        // Dano base escalado pelo perfil + parte do dano do inimigo
+        const bulletDmg = Math.max(1, Math.round((e.dmg * prof.dmgMul)));
+        shooterBullets.push({
+          x:e.x, y:e.y,
+          vx:(dx/d)*spd, vy:(dy/d)*spd,
+          life, alive:true,
+          dmg: bulletDmg,
+          from:e
+        });
       }
     }
 
@@ -321,18 +331,40 @@ export function updateEnemies(dt, safeZones) {
     if (!b.alive) continue;
     b.x += b.vx * 60 * dt; b.y += b.vy * 60 * dt; b.life -= dt;
     if (b.life <= 0) { b.alive=false; continue; }
+
     // colisão com player
-    const dist = Math.hypot(b.x - player.x, b.y - player.y);
-    if (dist < (player.radius||28) + 6) {
+    const distP = Math.hypot(b.x - player.x, b.y - player.y);
+    if (distP < (player.radius||28) + 6) {
       dealDamageToPlayer(b.dmg);
       b.alive = false;
+      continue;
     }
-    // colisão com blocos (absorvem projéteis)
+
+    // colisão com inimigos (friendly fire liberado, exceto o emissor)
     if (!b.alive) continue;
+    for (const e2 of enemies) {
+      if (!e2.alive || e2 === b.from) continue;
+      const hitE = Math.hypot(b.x - e2.x, b.y - e2.y) < (e2.radius + 6);
+      if (hitE) {
+        const eff = Math.max(0, 1 - (e2.dmgReduce || 0));
+        e2.hp -= b.dmg * eff;
+        b.alive = false;
+        break;
+      }
+    }
+    if (!b.alive) continue;
+
+    // colisão com blocos (agora causa dano nos blocos)
     for (const k of blocks){
       if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size||40)/2;
-      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) { b.alive=false; break; }
+      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) {
+        const eff = Math.max(0, 1 - (k.dmgReduce || 0));
+        k.hp -= b.dmg * eff;
+        k.recentHitTimer = 1.0;
+        if (k.hp <= 0) k.alive = false;
+        b.alive=false; break;
+      }
     }
   }
 
