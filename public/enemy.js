@@ -283,18 +283,18 @@ export function updateEnemies(dt, safeZones) {
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
         if (wantS1 && (!wantS2 || Math.random()<0.6)) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
+          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
           bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
-          e.s1cd = (e.phase>=3) ? 3 : 6;
           e.lastSkillCd = 1.5;
         } else if (wantS2) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
+          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
           bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
-          e.s2cd = 5;
           e.lastSkillCd = 1.5;
         }
       }
     }
-  
+  }
 
   for (const b of shooterBullets) {
     /* extended bullet collisions */
@@ -333,12 +333,8 @@ export function updateEnemies(dt, safeZones) {
       }
     }
 
-// ... dentro da função que calcula dano do inimigo:
-const damageOut = Math.floor(baseDamage * enemyDmgMult);
 
-  }
-
-  for (const p of bossProjectiles) {
+for (const p of bossProjectiles) {
     if (!p.alive) continue;
     p.x += p.vx * 60 * dt; p.y += p.vy * 60 * dt; p.life -= dt;
     if (p.life <= 0) { p.alive=false; continue; }
@@ -369,8 +365,8 @@ const damageOut = Math.floor(baseDamage * enemyDmgMult);
     // hit blocks
     for (const k of blocks){ if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size||40)/2;
+      const half = (BLOCK_TYPES[k.type]?.size||40)/2;
       if (Math.abs(p.x - k.x) <= half + rad && Math.abs(p.y - k.y) <= half + rad) { k.hp -= (p.type==="circle"? 35:28); k.recentHitTimer=1.0; p.alive=false; break; }
-    }
   }
 
   if (player.circleTimer !== undefined) {
@@ -381,7 +377,7 @@ const damageOut = Math.floor(baseDamage * enemyDmgMult);
       player.slowMult = 1;
     }
   }
-
+}
 
 export function drawEnemies(ctx, cam) {
   for (const e of enemies) {
