@@ -19,6 +19,24 @@ import {
 /* ---------- Canvas / Mapa ---------- */
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+function drawRankBadge(ctx, x, y, text){
+  if (!text) return;
+  ctx.save();
+  ctx.font = "bold 12px Arial";
+  const padX=6, padY=2;
+  const w = Math.floor(ctx.measureText(text).width) + padX*2;
+  const h = 18;
+  const rx = x - w/2, ry = y - h;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(rx, ry, w, h);
+  ctx.strokeStyle = "#6aa3ff";
+  ctx.strokeRect(rx, ry, w, h);
+  ctx.fillStyle = "#bfe0ff";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x - w/2 + padX, ry + h/2);
+  ctx.restore();
+}
+
 let viewW = window.innerWidth, viewH = window.innerHeight;
 canvas.width = viewW; canvas.height = viewH;
 let MAP_W = viewW * 3, MAP_H = viewH * 3;
@@ -514,7 +532,7 @@ function renderQuests() {
         <div><b>Reborn System</b></div>
         <div class="small">
           ${player.rebornCount>=1 ? "Concluída (você já renasceu)" :
-            (active ? "Progrida até o Lv 25 para desbloquear" : "Quest Será liberada no Lv 10")}
+            (active ? "Progrida até o Lv 25 para desbloquear" : "Será liberada no Lv 10")}
         </div>
       </div>
     </div>`;
@@ -630,6 +648,13 @@ function drawPlayer() {
     ctx.fillStyle="#7ec8ff"; ctx.fillRect(sx - w/2, sy - r - 26, w * pctS, h);
     ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 26, w, h);
   }
+
+  // Badge de Rank do jogador
+  try {
+    const pr = getCurrentRank?.();
+    const label = pr ? `Rank ${pr}` : `Sem Rank`;
+    drawRankBadge(ctx, sx, sy - r - 40, label);
+  } catch(e){}
 
   // Barra de HP
   if (player.maxHp) {
