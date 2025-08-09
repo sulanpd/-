@@ -1,11 +1,28 @@
 /* ========================================================================
+
+function drawRankBadge(ctx, x, y, text){
+  if (!text) return;
+  ctx.save();
+  ctx.font = "bold 12px Arial";
+  const padX=6;
+  const w = Math.floor(ctx.measureText(text).width) + padX*2;
+  const h = 18;
+  const rx = x - w/2, ry = y - h;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(rx, ry, w, h);
+  ctx.strokeStyle = "#6aa3ff";
+  ctx.strokeRect(rx, ry, w, h);
+  ctx.fillStyle = "#bfe0ff";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x - w/2 + padX, ry + h/2);
+  ctx.restore();
+}
+
  * enemy.js
  * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
  * ===================================================================== */
 import { player, getPlayerDefPercent } from "./player.js";
 import { randInt } from "./utils.js";
-import { getEnemyRankMultipliers } from "./rankSystem.js";
-
 export const enemies = [];
 export const shooterBullets = [];
 export const bossProjectiles = [];
@@ -131,9 +148,7 @@ export function updateEnemies(dt, safeZones) {
       player.hp -= b.dmg * (1 - def);
       b.alive = false;
     }
-
-// ... dentro da função que calcula dano do inimigo:
-const { enemyDmgMult } = getEnemyRankMultipliers(enemy.enemyRank);
+const { enemyDmgMult } = 1;
 const damageOut = Math.floor(baseDamage * enemyDmgMult);
 
   }
@@ -177,6 +192,9 @@ export function drawEnemies(ctx, cam) {
     const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
     ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w*pct, 6);
+    // Rank badge (se houver)
+    const rankText = (e._trialTargetRank ? `Rank ${e._trialTargetRank}` : (e.enemyRank ? `Rank ${e.enemyRank}` : (e.type==='boss' ? 'BOSS' : '')));
+    if (rankText) drawRankBadge(ctx, sx, sy - e.radius - 24, rankText);
 
     let levelColor = "#e0e0e0";
     if (e.type === "basic")   levelColor = "#7ec8ff";
