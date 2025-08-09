@@ -654,6 +654,13 @@ function drawPlayer() {
     ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 26, w, h);
   }
 
+  // Badge de Rank do jogador (centralizado)
+  try {
+    const pr = (typeof getCurrentRank === 'function') ? getCurrentRank() : null;
+    const label = pr ? `Rank ${pr}` : `Sem Rank`;
+    drawRankBadge(ctx, sx, sy - r - 46, label, {height:20});
+  } catch(e){}
+
   // Barra de HP
   if (player.maxHp) {
     const w=84, h=8, pct=Math.max(0, Math.min(1, player.hp/player.maxHp));

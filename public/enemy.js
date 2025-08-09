@@ -27,8 +27,6 @@ function drawRankBadge(ctx, x, y, text, opts){
  * ===================================================================== */
 import { player, getPlayerDefPercent } from "./player.js";
 import { randInt } from "./utils.js";
-import { getEnemyRankMultipliers } from "./rankSystem.js";
-
 export const enemies = [];
 export const shooterBullets = [];
 export const bossProjectiles = [];
@@ -156,7 +154,6 @@ export function updateEnemies(dt, safeZones) {
     }
 
 // ... dentro da função que calcula dano do inimigo:
-const { enemyDmgMult } = getEnemyRankMultipliers(enemy.enemyRank);
 const damageOut = Math.floor(baseDamage * enemyDmgMult);
 
   }
