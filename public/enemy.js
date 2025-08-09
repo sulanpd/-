@@ -21,6 +21,29 @@ function drawRankBadge(ctx, x, y, text, opts){
   ctx.restore();
 }
 
+
+// === Enemy Rank (display only) ================================
+function enemyDisplayRank(level){
+  // Map enemy level -> display rank label (visual only; doesn't affect gameplay)
+  // Tuned to spread roughly from early to late-game.
+  const L = Math.max(1, level|0);
+  if (L <= 2)  return "E";
+  if (L <= 4)  return "E+";
+  if (L <= 6)  return "D";
+  if (L <= 8)  return "D+";
+  if (L <= 10) return "C+";
+  if (L <= 14) return "B";
+  if (L <= 18) return "B+";
+  if (L <= 22) return "A";
+  if (L <= 26) return "A+";
+  if (L <= 30) return "S";
+  if (L <= 34) return "S+";
+  if (L <= 38) return "SS";
+  if (L <= 42) return "SS+";
+  if (L <= 52) return "SSS";
+  if (L <= 58) return "SSS+";
+  return "U";
+}
 /* ========================================================================
  * enemy.js
  * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
@@ -204,6 +227,11 @@ export function drawEnemies(ctx, cam) {
     ctx.fillStyle = levelColor;
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
+    try {
+      const er = enemyDisplayRank(e.level);
+      const stroke = (e.type==="boss"?"#ff6b8a":(e.type==="orange"?"#ffd27e":"#7ec8ff"));
+      drawRankBadge(ctx, sx, sy - e.radius - 44, `Rank ${er}`, { height:18, stroke });
+    } catch(_) {}
     ctx.fillText(`Lv ${e.level}`, sx, sy - e.radius - 24);
   }
 
