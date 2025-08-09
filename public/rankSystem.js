@@ -1,217 +1,149 @@
-// rankSystem.js
-// Sistema de Rank estilo Solo Leveling: desbloqueia no Reborn 2, PC (Poder de Combate), progressão via boss Tank
+/* ========================================================================
+ * rankSystem.js
+ * Sistema de Rank inspirado em Solo Leveling.
+ * - Desbloqueia após Reborn 2
+ * - "Poder de Combate" (Power) vem de:
+ *     * Pontos em skills: Dano=+2, Body=+3, Defesa=+3, Vida=+1 (por ponto)
+ *     * Bônus de chefes de prova de rank (escala por rank)
+ *     * (Futuro) conquistas específicas
+ * - Progressão: quando o Power alcançar o requisito, aparece botão de "Progredir >> Rank X".
+ *   Ao clicar, nasce um Boss (classe Tank) no nível atual do jogador. Ao derrotá-lo, sobe o Rank.
+ * - Bônus por Rank (cumulativos por degrau):
+ *     * DPS: +3% dano, +1% redução
+ *     * TANK: +1.5% dano, +3% redução
+ * ===================================================================== */
+import { player } from "./player.js";
+import { spawnBoss, enemies } from "./enemy.js";
+import { clamp } from "./utils.js";
 
-// ======= ORDEM DE RANKS =======
-export const RANK_ORDER = [
-  "NonRank", // Sem Rank
-  "E","E+","D","D+","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"
-];
-
-// ======= REQUISITOS DE PODER PARA PROGREDIR =======
-// Ajuste livremente para ritmo de progressão desejado
-export const RANK_REQUIREMENTS = {
-  "E": 10,
-  "E+": 20,
-  "D": 35,
-  "D+": 50,
-  "C+": 75,
-  "B": 110,
-  "B+": 160,
-  "A": 220,
-  "A+": 300,
-  "S": 400,
-  "S+": 550,
-  "SS": 750,
-  "SS+": 1000,
-  "SSS": 1350,
-  "SSS+": 1800,
-  "U": 2400,
+/* ---------- Tiers e Requisitos ---------- */
+export const RANK_ORDER = ["E","E+","D","D+","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"];
+const RANK_REQUIREMENTS = {
+  "E":10, "E+":20, "D":35, "D+":50, "C+":70, "B":95, "B+":120,
+  "A":150, "A+":185, "S":230, "S+":280, "SS":340, "SS+":410,
+  "SSS":490, "SSS+":580, "U":700
+};
+/* Power ganho por Boss de prova (pode ajustar conforme balance) */
+const RANK_BOSS_REWARD = {
+  "E":10, "E+":12, "D":15, "D+":18, "C+":20, "B":25, "B+":30,
+  "A":35, "A+":40, "S":50, "S+":60, "SS":75, "SS+":90,
+  "SSS":110, "SSS+":140, "U":180
 };
 
-// ======= RECOMPENSA DE PC POR MATAR BOSS DE RANK =======
-// Base pedido: matar boss dá 10 PC e "aumenta conforme o rank". Aqui uma curva leve.
-export const BOSS_PC_REWARD = {
-  "E": 10,
-  "E+": 12,
-  "D": 14,
-  "D+": 16,
-  "C+": 18,
-  "B": 20,
-  "B+": 24,
-  "A": 28,
-  "A+": 32,
-  "S": 40,
-  "S+": 50,
-  "SS": 65,
-  "SS+": 85,
-  "SSS": 110,
-  "SSS+": 140,
-  "U": 180,
+/* ---------- Estado ---------- */
+const state = {
+  unlocked: false,          // vira true após Reborn 2
+  currentRank: null,        // null = Sem Rank
+  powerFromSkills: 0,
+  powerFromBosses: 0,
+  powerFromAchievements: 0,
+  activeTrial: null,        // { targetRank, bossRef }
 };
 
-// ======= BÔNUS DO PLAYER POR RANK (DPS/TANK) =======
-// Valores percentuais aplicados como multiplicadores (1.00 = sem bônus)
-export const PLAYER_RANK_BONUS = {
-  // rank: { DPS: { dmg, dr }, TANK: { dmg, dr } }  // dr = damage reduction
-  "E":   { DPS:{dmg:1.02, dr:1.01}, TANK:{dmg:1.01, dr:1.02} },
-  "E+":  { DPS:{dmg:1.03, dr:1.01}, TANK:{dmg:1.01, dr:1.03} },
-  "D":   { DPS:{dmg:1.04, dr:1.02}, TANK:{dmg:1.02, dr:1.04} },
-  "D+":  { DPS:{dmg:1.06, dr:1.02}, TANK:{dmg:1.02, dr:1.06} },
-  "C+":  { DPS:{dmg:1.08, dr:1.03}, TANK:{dmg:1.03, dr:1.08} },
-  "B":   { DPS:{dmg:1.10, dr:1.04}, TANK:{dmg:1.04, dr:1.10} },
-  "B+":  { DPS:{dmg:1.12, dr:1.05}, TANK:{dmg:1.05, dr:1.12} },
-  "A":   { DPS:{dmg:1.15, dr:1.06}, TANK:{dmg:1.06, dr:1.15} },
-  "A+":  { DPS:{dmg:1.18, dr:1.07}, TANK:{dmg:1.07, dr:1.18} },
-  "S":   { DPS:{dmg:1.22, dr:1.09}, TANK:{dmg:1.09, dr:1.22} },
-  "S+":  { DPS:{dmg:1.26, dr:1.11}, TANK:{dmg:1.11, dr:1.26} },
-  "SS":  { DPS:{dmg:1.30, dr:1.13}, TANK:{dmg:1.13, dr:1.30} },
-  "SS+": { DPS:{dmg:1.34, dr:1.15}, TANK:{dmg:1.15, dr:1.34} },
-  "SSS": { DPS:{dmg:1.38, dr:1.17}, TANK:{dmg:1.17, dr:1.38} },
-  "SSS+":{ DPS:{dmg:1.42, dr:1.19}, TANK:{dmg:1.19, dr:1.42} },
-  "U":   { DPS:{dmg:1.40, dr:1.20}, TANK:{dmg:1.20, dr:1.40} }, // levemente diferente p/ feeling "U"
-};
-
-// ======= MULTIPLICADORES DOS INIMIGOS POR RANK =======
-// enemyDmgMult: multiplicador no dano que o inimigo causa
-// enemyDR: redução do dano recebido (1.00 = sem redução; >1 significa "reduz mais")
-export const ENEMY_RANK_MULT = {
-  "NonRank": { enemyDmgMult:1.00, enemyDR:1.00 },
-  "E":   { enemyDmgMult:1.05, enemyDR:1.03 },
-  "E+":  { enemyDmgMult:1.07, enemyDR:1.05 },
-  "D":   { enemyDmgMult:1.10, enemyDR:1.07 },
-  "D+":  { enemyDmgMult:1.12, enemyDR:1.09 },
-  "C+":  { enemyDmgMult:1.15, enemyDR:1.12 },
-  "B":   { enemyDmgMult:1.18, enemyDR:1.15 },
-  "B+":  { enemyDmgMult:1.22, enemyDR:1.18 },
-  "A":   { enemyDmgMult:1.26, enemyDR:1.22 },
-  "A+":  { enemyDmgMult:1.31, enemyDR:1.26 },
-  "S":   { enemyDmgMult:1.36, enemyDR:1.31 },
-  "S+":  { enemyDmgMult:1.42, enemyDR:1.36 },
-  "SS":  { enemyDmgMult:1.48, enemyDR:1.42 },
-  "SS+": { enemyDmgMult:1.55, enemyDR:1.48 },
-  "SSS": { enemyDmgMult:1.63, enemyDR:1.55 },
-  "SSS+":{ enemyDmgMult:1.72, enemyDR:1.63 },
-  "U":   { enemyDmgMult:1.82, enemyDR:1.72 },
-};
-
-// ======= CÁLCULO: PODER DE COMBATE =======
-// soma "dinâmica" a partir dos stats atuais + bônus cumulativos (boss/conquistas)
-export function calculateCombatPower(player) {
-  const p = player;
-  const base =
-      (p.dmg || 0) * 2
-    + (p.bodyDmg || 0) * 3
-    + (p.def || 0) * 3
-    + (p.maxHp || 0) * 1;
-
-  const extra = (p.bonusCombatPower || 0); // por bosses, conquistas futuras, etc.
-  const total = Math.max(0, Math.floor(base + extra));
-  p.combatPower = total;
-  return total;
-}
-
-// ======= UTILITÁRIOS DE RANK =======
-export function getNextRank(currentRank) {
-  const idx = RANK_ORDER.indexOf(currentRank || "NonRank");
-  return RANK_ORDER[Math.min(idx + 1, RANK_ORDER.length - 1)];
-}
-
-export function hasRankSystemUnlocked(player) {
-  return !!player.rankSystemUnlocked;
-}
-
-export function unlockRankSystemIfEligible(player) {
-  // desbloqueia no Reborn 2
-  if (!player.rankSystemUnlocked && (player.rebornCount || 0) >= 2) {
-    player.rankSystemUnlocked = true;
-    // inicia missão: atingir 10 PC
-    if (!player.rankMission) {
-      player.rankMission = { targetRank: "E", requiredPC: RANK_REQUIREMENTS["E"], status: "PENDING" };
-    }
-  }
-}
-
-// ======= CONDIÇÃO PARA PROGREDIR =======
-export function canProgressToNextRank(player) {
-  if (!player.rankSystemUnlocked) return { ok:false, reason:"Sistema de Rank bloqueado (Reborn 2 necessário)." };
-  const current = player.currentRank || "NonRank";
-  const next = getNextRank(current);
-  if (next === current || next === "NonRank") return { ok:false, reason:"Sem próximo rank." };
-  // precisa de poder de combate mínimo
-  calculateCombatPower(player);
-  const req = RANK_REQUIREMENTS[next];
-  if (req == null) return { ok:false, reason:"Requisito não definido para o próximo rank." };
-  if (player.combatPower < req) {
-    return { ok:false, reason:`Poder de Combate insuficiente (${player.combatPower}/${req}).` };
-  }
-  return { ok:true, nextRank: next, requiredPC: req };
-}
-
-// ======= PROGRESSÃO VIA BOSS =======
-let _rankChallenge = null;
-// { active: true, targetRank: "E", bossId: <id> }
-
-export function isInRankChallenge() {
-  return _rankChallenge?.active === true;
-}
-
-export function requestRankProgression(player, spawnBossFn) {
-  const check = canProgressToNextRank(player);
-  if (!check.ok) return check;
-
-  const targetRank = check.nextRank;
-  // spawna boss Tank no nível atual do player e com rank alvo
-  const bossInfo = spawnBossFn({
-    level: player.level || 1,
-    rank: targetRank,
-    clazz: "TANK",
-    isRankTrial: true
-  });
-
-  _rankChallenge = {
-    active: true,
-    targetRank,
-    bossId: bossInfo?.id ?? null
+/* ---------- API ---------- */
+export function isUnlocked() { return !!state.unlocked; }
+export function getCurrentRank() { return state.currentRank; }
+export function getPowerBreakdown(){
+  return {
+    total: state.powerFromSkills + state.powerFromBosses + state.powerFromAchievements,
+    skills: state.powerFromSkills,
+    bosses: state.powerFromBosses,
+    achieves: state.powerFromAchievements
   };
-
-  return { ok:true, targetRank, bossId: _rankChallenge.bossId };
+}
+export function getNextRank(){
+  if (!state.unlocked) return null;
+  const idx = (state.currentRank ? RANK_ORDER.indexOf(state.currentRank)+1 : 0);
+  return RANK_ORDER[idx] || null;
+}
+export function getRequiredPowerFor(rank){
+  return RANK_REQUIREMENTS[rank] ?? Infinity;
+}
+export function grantAchievementPower(v){
+  state.powerFromAchievements += Math.max(0, v|0);
+}
+export function addBossPowerFor(rank){
+  const v = RANK_BOSS_REWARD[rank] ?? 10;
+  state.powerFromBosses += v;
 }
 
-// Deve ser chamado quando o boss de progressão MORRER
-export function onRankBossDefeated(player, bossRank) {
-  if (!isInRankChallenge()) return;
-  if (bossRank !== _rankChallenge.targetRank) return; // segurança
-
-  // Concede PC extra conforme rank do boss
-  const reward = BOSS_PC_REWARD[bossRank] ?? 10;
-  player.bonusCombatPower = (player.bonusCombatPower || 0) + reward;
-
-  // Sobe Rank
-  player.currentRank = bossRank;
-
-  // Atualiza missão: prepara próxima
-  const next = getNextRank(player.currentRank);
-  if (next !== player.currentRank) {
-    player.rankMission = { targetRank: next, requiredPC: RANK_REQUIREMENTS[next], status: "PENDING" };
-  } else {
-    player.rankMission = { targetRank: null, requiredPC: null, status: "MAX" };
-  }
-
-  // Finaliza challenge
-  _rankChallenge = null;
+/* ---------- Regras de Pontos por Level ---------- */
+export function shouldGrantPointOnLevel(level){
+  // Antes de desbloquear: 1 ponto por level (comportamento antigo)
+  // Após desbloquear (Reborn >=2): 1 ponto a cada 3 níveis
+  if (!state.unlocked) return true;
+  return (level % 3) === 0;
 }
 
-// ======= BÔNUS DO PLAYER (DANO/REDUÇÃO) POR RANK E CLASSE =======
-export function getPlayerRankBonuses(player) {
-  const rank = player.currentRank;
-  const clazz = (player.rebornClass || "DPS").toUpperCase(); // "DPS" ou "TANK"
-  const b = PLAYER_RANK_BONUS[rank];
-  if (!b) return { dmg:1.00, dr:1.00 };
-  const byClass = b[clazz] || b["DPS"];
-  return { dmg: byClass.dmg, dr: byClass.dr };
+/* ---------- Poder de combate (skills) ---------- */
+export function recomputeSkillPower(){
+  const s = player.skill || { dmg:0, def:0, hp:0, body:0 };
+  state.powerFromSkills =
+      (s.dmg|0)*2 +
+      (s.body|0)*3 +
+      (s.def|0)*3 +
+      (s.hp|0)*1;
 }
 
-// ======= MULTIPLICADORES DO INIMIGO POR RANK =======
-export function getEnemyRankMultipliers(enemyRank) {
-  return ENEMY_RANK_MULT[enemyRank || "NonRank"] || ENEMY_RANK_MULT["NonRank"];
+/* ---------- Trial de Rank ---------- */
+export function canProgress(){
+  const next = getNextRank();
+  if (!next) return { ok:false, reason: "No next rank" };
+  if (state.activeTrial) return { ok:false, reason: "Trial already active" };
+  const p = getPowerBreakdown().total;
+  const need = getRequiredPowerFor(next);
+  return { ok: p >= need, need };
+}
+export function startTrial(mapW, mapH, safeZones){
+  const next = getNextRank();
+  if (!next) return null;
+  // Nasce Boss Tank com nível atual do jogador
+  const boss = spawnBoss(mapW, mapH, safeZones, player.level);
+  boss._rankTrial = true;
+  boss._trialTargetRank = next;
+  state.activeTrial = { targetRank: next, bossRef: boss };
+  return boss;
+}
+export function onBossDefeated(boss){
+  if (!boss?._rankTrial) return;
+  const rank = boss._trialTargetRank;
+  addBossPowerFor(rank);
+  // Sobe para o rank em questão
+  state.currentRank = rank;
+  state.activeTrial = null;
+}
+
+/* ---------- Desbloqueio ---------- */
+export function checkUnlockByReborn(){
+  state.unlocked = (player.rebornCount||0) >= 2;
+}
+
+/* ---------- Bônus por Rank ---------- */
+function rankStepsCount(){
+  if (!state.currentRank) return 0;
+  const idx = RANK_ORDER.indexOf(state.currentRank);
+  return (idx >= 0) ? (idx+1) : 0;
+}
+export function getRankBonuses(){
+  const steps = rankStepsCount();
+  if (steps <= 0) return { dmgMult:1.0, drBonus:0.0 };
+  // pesos diferentes por classe
+  const isDPS = player.rebornClass === "DPS";
+  const dmgPer = isDPS ? 0.03 : 0.015;
+  const drPer  = isDPS ? 0.01 : 0.03;
+  const dmgMult = 1 + dmgPer * steps;
+  const drBonus = clamp(drPer * steps, 0, 0.6);
+  return { dmgMult, drBonus };
+}
+export function applyRankBonusesToPlayer(){
+  const b = getRankBonuses();
+  player.rankDamageMult = b.dmgMult || 1.0;
+  player.rankExtraDR    = b.drBonus || 0.0;
+}
+
+/* ---------- Tick ---------- */
+export function tickRankSystem(){
+  checkUnlockByReborn();
+  recomputeSkillPower();
+  applyRankBonusesToPlayer();
 }

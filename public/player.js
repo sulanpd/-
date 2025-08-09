@@ -1,6 +1,5 @@
 /* ========================================================================
- * player.js — com Reborn Count, XP Mult por Reborn, bloqueio Body p/ DPS
- * + campos de Rank (rankDmgMult / rankDRAdd) para buffs dinâmicos
+ * player.js — com Reborn Count, XP Mult por Reborn e bloqueio de Body p/ DPS
  * ===================================================================== */
 export const player = {
   x: 0, y: 0, radius: 28, color: "#4ccfff",
@@ -18,6 +17,10 @@ export const player = {
   extraDR: 0.0,
   ignoreChance: 0.0,
 
+  // Rank System (multiplicadores aplicados por rankSystem.js)
+  rankDamageMult: 1.0,
+  rankExtraDR: 0.0,
+
   // Reborn System
   hasReborn: false,
   rebornClass: null,        // "DPS" | "TANK" | null
@@ -27,10 +30,6 @@ export const player = {
   shield: 0,
   shieldMax: 0,
   shieldDRBoost: 0.25,      // 25% mais efetivo no escudo
-
-  // Rank (buffs dinâmicos aplicados por frame)
-  rankDmgMult: 1.0,
-  rankDRAdd: 0.0,
 
   respawnTimer: 0
 };
@@ -141,10 +140,6 @@ export function doReborn(classChoice, BASES, safeZones) {
   player.blockDmgMult = 1.0;
   player.extraDR = 0.0;
   player.ignoreChance = 0.0;
-
-  // Reset buffs de rank (serão recalculados no loop do jogo)
-  player.rankDmgMult = 1.0;
-  player.rankDRAdd = 0.0;
 
   // Efeitos de classe
   if (player.rebornClass === "DPS") {

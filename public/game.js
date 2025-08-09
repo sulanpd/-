@@ -1,5 +1,5 @@
 /* ========================================================================
- * game.js — XP Mult por Reborn (até 3), Rank System, botão e desafios
+ * game.js — XP Mult por Reborn (até 3), indicador visual e bloqueio Body DPS
  * ===================================================================== */
 import {
   player, resetPlayer, playerBaseStats, getPlayerRegen,
@@ -10,7 +10,11 @@ import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies } from "./en
 import { blocks, BLOCK_TYPES, spawnBlock, drawBlocks, updateBlocksHitTimers } from "./blocks.js";
 import { playerBullets, spawnPlayerBullet, updatePlayerBullets, drawPlayerBullets, setProjectileRangeMult } from "./projectiles.js";
 import { clamp } from "./utils.js";
-import * as Rank from "./rankSystem.js";
+import {
+  isUnlocked as rankUnlocked,
+  getCurrentRank, getNextRank, getPowerBreakdown, getRequiredPowerFor,
+  shouldGrantPointOnLevel, startTrial, onBossDefeated, tickRankSystem
+} from "./rankSystem.js";
 
 /* ---------- Canvas / Mapa ---------- */
 const canvas = document.getElementById("game");
@@ -57,7 +61,7 @@ function updateMouseWorld(e){
 }
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key.toLowerCase() === "escape") { toggleSkills(false); toggleReborn(false); toggleRank(false); }
+  if (e.key.toLowerCase() === "escape") { toggleSkills(false); toggleReborn(false); }
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
@@ -67,7 +71,7 @@ canvas.addEventListener("mousemove", updateMouseWorld);
 function tryShoot(){
   if (!player.alive) return;
   if (shootCD <= 0 && isShooting) {
-    const dmg = Math.max(1, player.dmg) * playerDamageMult * (player.rankDmgMult || 1);
+    const dmg = Math.max(1, player.dmg) * playerDamageMult;
     spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 16, dmg);
     shootCD = FIRE_RATE;
   }
@@ -100,7 +104,7 @@ function initGame() {
     spawnBlock("blue", MAP_W, MAP_H, getSafeZones());
     spawnBlock("purple", MAP_W, MAP_H, getSafeZones());
   }
-  for (let i = 0; i < 8; i++) spawnEnemy("basic", MAP_W, MAP_H, getSafeZones(), null, Rank.ambientEnemyRankIndex());
+  for (let i = 0; i < 8; i++) spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
   centerCameraOnPlayer();
 }
 
@@ -114,46 +118,15 @@ const eventMsg = document.getElementById("eventMsg");
 const deathMsg = document.getElementById("deathMsg");
 const dmgReduceIcon = document.getElementById("dmgReduceIcon");
 const rebornBadge = document.getElementById("rebornBadge");
-
-// Rank HUD refs
-const btnOpenRank = document.getElementById("openRank");
+// Rank UI
+const rankBtn = document.getElementById("openRank");
 const rankPanel = document.getElementById("rankPanel");
-const rankBadge = document.getElementById("rankBadge");
-const rankPowerSpan = document.getElementById("rankPower");
-const rankNextReqSpan = document.getElementById("rankNextReq");
-const rankProgressBtn = document.getElementById("rankProgressBtn");
-
-btnOpenRank?.addEventListener("click", () => toggleRank());
 
 function updateRebornBadge() {
   if (!rebornBadge) return;
   const n = player.rebornCount || 0;
   rebornBadge.textContent = `⭐ x${n} / 3`;
   rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n*25}%`;
-}
-
-function updateRankHUD() {
-  if (!rankBadge) return;
-  rankBadge.textContent = `Rank: ${Rank.getCurrentRankName()}`;
-  const p = Rank.computeCombatPower();
-  const nextName = Rank.getNextRankName();
-  const need = Rank.powerNeededFor(Rank.getNextRankIndex());
-  if (rankPowerSpan) rankPowerSpan.textContent = p;
-  if (rankNextReqSpan) rankNextReqSpan.textContent = `${nextName} ≥ ${need}`;
-  if (rankProgressBtn) {
-    const can = Rank.canProgress();
-    rankProgressBtn.disabled = !can;
-    rankProgressBtn.textContent = can ? `Progredir >> ${nextName}` : "Progredir";
-  }
-  // botão do HUD pisca quando pode progredir
-  if (btnOpenRank) btnOpenRank.className = (Rank.canProgress() ? "glow" : "");
-}
-
-function toggleRank(force) {
-  if (!rankPanel) return;
-  const show = (typeof force === "boolean") ? force : (rankPanel.style.display !== "block");
-  rankPanel.style.display = show ? "block" : "none";
-  if (show) updateRankHUD();
 }
 
 function updateHUD() {
@@ -164,7 +137,15 @@ function updateHUD() {
   if (xpbar) { const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext)); xpbar.style.width = Math.floor(pct * 100) + "%"; }
   if (dmgReduceIcon) dmgReduceIcon.style.display = (player.milestones.def10 ? "flex" : "none");
   updateRebornBadge();
-  updateRankHUD();
+  if (rankBtn) {
+    const unlocked = rankUnlocked();
+    const next = unlocked ? getNextRank() : null;
+    const pb = unlocked && next ? getPowerBreakdown() : null;
+    const can = unlocked && next && pb.total >= getRequiredPowerFor(next);
+    rankBtn.disabled = !unlocked;
+    rankBtn.className = (unlocked && can) ? 'glow' : '';
+    rankBtn.title = unlocked ? (can && next ? `Pronto para Rank ${next}` : 'Progrida o Poder para avançar') : 'Desbloqueia no Reborn 2';
+  }
 }
 function flashEvent(msg) {
   if (!eventMsg) return;
@@ -172,7 +153,7 @@ function flashEvent(msg) {
   eventMsg.style.display = "block";
   setTimeout(() => { eventMsg.style.display = "none"; }, 3000);
 }
-function showDeathMsg(show) { if (deathMsg) show ? (deathMsg.style.display = "block", deathMsg.textContent="Você morreu!") : deathMsg.style.display = "none"; }
+function showDeathMsg(show) { if (deathMsg) deathMsg.style.display = show ? "block" : "none"; }
 
 /* ---------- Skills UI ---------- */
 const btnSkills = document.getElementById("openSkills");
@@ -243,7 +224,6 @@ function upgradeSkill(key) {
   player.skill[key] = (player.skill[key] || 0) + 1;
   player.points -= 1;
   playerBaseStats(BASES);
-  updateRankHUD();
   renderSkills(); updateHUD();
 }
 
@@ -312,23 +292,13 @@ function drawMilestoneBadges() {
   }
 }
 
-// Regras de pontos por nível (após liberar Rank System: 1 ponto a cada 3 níveis)
-function shouldGrantPointOnLevel(lvl) {
-  if (!Rank.isUnlocked()) return true; // antes de liberar, 1 ponto por nível
-  return (lvl % 3) === 0;              // depois, 1 ponto a cada 3 níveis
-}
-
 function addXP(v) {
   player.xp += v * xpMult;
   while (player.xp >= player.xpToNext) {
     player.xp -= player.xpToNext;
     player.level++;
-    if (shouldGrantPointOnLevel(player.level)) {
-      player.points++;
-      flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
-    } else {
-      flashEvent(`Nível ${player.level}!`);
-    }
+    // Regras de pontos com Rank System
+    if (shouldGrantPointOnLevel(player.level)) player.points++;
     player.xpToNext = xpToNext(player.level);
     playerBaseStats(BASES);
 
@@ -343,6 +313,7 @@ function addXP(v) {
     }
 
     if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Novo objetivo: Renascer (alcance o Nível 25)"); }
+    flashEvent(`Nível ${player.level}! +1 ponto de habilidade`);
   }
 }
 
@@ -364,7 +335,7 @@ function updateRespawns(dt) {
   if (accBasic >= RESPAWN.basic) {
     accBasic -= RESPAWN.basic;
     if (enemies.filter(e=>e.alive && e.type==="basic").length < LIMITS.basic) {
-      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones(), null, Rank.ambientEnemyRankIndex());
+      spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
     }
   }
   if (player.level >= 15) {
@@ -372,7 +343,7 @@ function updateRespawns(dt) {
     if (accOrange >= RESPAWN.orange) {
       accOrange -= RESPAWN.orange;
       if (enemies.filter(e=>e.alive && e.type==="orange").length < LIMITS.orange) {
-        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones(), null, Rank.ambientEnemyRankIndex());
+        spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
       }
     }
   } else accOrange = 0;
@@ -394,7 +365,7 @@ function dealDamageToPlayer(raw) {
   if (player.ignoreChance > 0 && Math.random() < player.ignoreChance) return;
 
   const baseDef = getPlayerDefPercent();
-  const totalDR = Math.max(0, Math.min(0.95, 1 - (1 - baseDef) * (1 - (player.extraDR || 0)) * (1 - (player.rebornExtraDR || 0)) * (1 - (player.rankDRAdd || 0))));
+  const totalDR = Math.max(0, Math.min(0.95, 1 - (1 - baseDef) * (1 - (player.extraDR || 0)) * (1 - (player.rebornExtraDR || 0)) * (1 - (player.rankExtraDR || 0))));
   let remaining = raw;
 
   if (player.shield > 0) {
@@ -434,7 +405,7 @@ function updateCollisions(dt) {
 
       const eff = Math.max(0, 1 - (b.dmgReduce || 0));
       const bonusVsBlocks = player.blockDmgMult || 1.0;
-      const bodyDps = Math.max(1, player.bodyDmg) * playerDamageMult * (player.rankDmgMult||1) * bonusVsBlocks * eff * dt;
+      const bodyDps = Math.max(1, player.bodyDmg) * playerDamageMult * bonusVsBlocks * eff * dt;
       b.hp -= bodyDps; b.recentHitTimer = 1.2;
       if (b.hp <= 0) {
         b.alive = false;
@@ -444,7 +415,7 @@ function updateCollisions(dt) {
     }
   }
 
-  // tiros do player vs inimigos e blocos
+  // tiros do player vs inimigos e blocos (igual antes)
   for (const pb of playerBullets) {
     if (!pb.alive) continue;
 
@@ -452,25 +423,15 @@ function updateCollisions(dt) {
       if (!e.alive) continue;
       const hit = Math.hypot(pb.x - e.x, pb.y - e.y) < (e.radius + 6);
       if (hit) {
-        // DR do inimigo inclui DR do rank
-        const enemyDR = 1 - (1 - (e.dmgReduce || 0)) * (1 - (e.rankDRAdd || 0));
-        const dmg = pb.damage * (1 - enemyDR);
+        const dmg = pb.damage * (1 - (e.dmgReduce || 0));
         e.hp -= dmg; pb.alive = false;
         if (e.hp <= 0) {
-          const wasChallenge = !!e.isRankChallenge;
           e.alive = false;
+          try { onBossDefeated(e); } catch (err) {}
           const xp = e.xpReward || 10;
           addXP(getPlayerBonusXP(xp)); score += Math.floor(xp * 0.5);
-          if (wasChallenge) {
-            Rank.onBossDefeated(e);
-            flashEvent(`✨ Novo Rank: ${Rank.getCurrentRankName()}!`);
-            pushAchievementBanner(`✨ Rank ${Rank.getCurrentRankName()} desbloqueado`, 2500);
-          } else {
-            // Boss comum também concede 10 pontos de luta
-            try { Rank.rankState.bossBonusPoints += 10; } catch {}
-            flashEvent("+XP");
-            pushAchievementBanner("+XP", 1200);
-          }
+          flashEvent(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP");
+          pushAchievementBanner(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP", 1200);
         }
         break;
       }
@@ -483,7 +444,7 @@ function updateCollisions(dt) {
       if (Math.abs(pb.x - k.x) <= half + 6 && Math.abs(pb.y - k.y) <= half + 6) {
         const eff = Math.max(0, 1 - (k.dmgReduce || 0));
         const bonusVsBlocks = player.blockDmgMult || 1.0;
-        k.hp -= pb.damage * (player.rankDmgMult||1) * bonusVsBlocks * eff; k.recentHitTimer = 1.2; pb.alive = false;
+        k.hp -= pb.damage * bonusVsBlocks * eff; k.recentHitTimer = 1.2; pb.alive = false;
         if (k.hp <= 0) {
           k.alive = false;
           const xp = k.xpReward || (BLOCK_TYPES[k.type]?.xp || 0);
@@ -499,23 +460,13 @@ function updateCollisions(dt) {
     if (!e.alive) continue;
     const dist = Math.hypot(player.x - e.x, player.y - e.y);
     if (dist < (player.radius||28) + e.radius) {
-      // dano do inimigo inclui multiplicador do rank
-      dealDamageToPlayer(e.dmg * (e.rankDmgMult||1) * dt);
-      const enemyDR = 1 - (1 - (e.dmgReduce || 0)) * (1 - (e.rankDRAdd || 0));
-      const dmgToEnemy = Math.max(1, player.bodyDmg) * playerDamageMult * (player.rankDmgMult||1) * (1 - enemyDR) * dt;
+      dealDamageToPlayer(e.dmg * dt);
+      const dmgToEnemy = Math.max(1, player.bodyDmg) * playerDamageMult * (1 - (e.dmgReduce || 0)) * dt;
       e.hp -= dmgToEnemy;
       if (e.hp <= 0) {
-        const wasChallenge = !!e.isRankChallenge;
         e.alive = false;
         const xp = e.xpReward || 10;
         addXP(getPlayerBonusXP(xp)); score += Math.floor(xp * 0.5);
-        if (wasChallenge) {
-          Rank.onBossDefeated(e);
-          flashEvent(`✨ Novo Rank: ${Rank.getCurrentRankName()}!`);
-          pushAchievementBanner(`✨ Rank ${Rank.getCurrentRankName()} desbloqueado`, 2500);
-        } else if (e.type === "boss") {
-          try { Rank.rankState.bossBonusPoints += 10; } catch {}
-        }
       }
     }
   }
@@ -642,9 +593,6 @@ function confirmReborn(cls) {
   const previousCount = player.rebornCount || 0;
   doReborn(cls, BASES, getSafeZones());
 
-  // Libera Rank System a partir do Reborn 2
-  Rank.setUnlocked((player.rebornCount || 0) >= 2);
-
   // Atualiza multiplicadores depois do Reborn
   updateXpMult();
   playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
@@ -662,16 +610,6 @@ function confirmReborn(cls) {
   renderQuests();
   updateHUD();
 }
-
-/* ---------- Rank Panel Buttons ---------- */
-rankProgressBtn?.addEventListener("click", () => {
-  if (!Rank.canProgress()) return;
-  const boss = Rank.startProgression(MAP_W, MAP_H, getSafeZones(), player.level);
-  if (boss) {
-    flashEvent(`⚔️ Desafio de Rank: ${Rank.getNextRankName()} (Boss Tank)`);
-    toggleRank(false);
-  }
-});
 
 /* ---------- Render ---------- */
 function drawGrid() {
@@ -726,11 +664,6 @@ function update() {
     rebornQuest.started = true;
   }
 
-  // Rank System desbloqueia no Reborn 2
-  Rank.setUnlocked((player.rebornCount || 0) >= 2);
-  // Aplica buffs do rank ao player a cada frame
-  Rank.applyPlayerMods();
-
   if (player.alive) handleInput(dt);
   shootCD -= dt; if (isShooting) tryShoot();
 
@@ -740,6 +673,11 @@ function update() {
   updateRespawn(dt);
   updateBlocksHitTimers(dt);
   updateRespawns(dt);
+
+  // Rank: atualizar poder e bônus
+  tickRankSystem();
+  // Aplicar multiplicadores no dano do jogador (projétil/body)
+  playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0) * (player.rankDamageMult||1.0);
 
   centerCameraOnPlayer(); updateHUD(); renderQuests();
 }
@@ -757,3 +695,46 @@ window.addEventListener("resize", () => {
 initGame();
 updateXpMult(); // inicializa multiplicador de XP
 gameLoop();
+
+/* ---------- Rank UI ---------- */
+rankBtn?.addEventListener("click", () => toggleRank());
+function toggleRank(force){
+  if (!rankPanel) return;
+  const show = (typeof force === "boolean") ? force : (rankPanel.style.display !== "block");
+  rankPanel.style.display = show ? "block" : "none";
+  if (show) renderRankPanel();
+}
+function renderRankPanel(){
+  if (!rankPanel) return;
+  const unlocked = rankUnlocked();
+  const cur = getCurrentRank() || "Sem Rank";
+  const next = getNextRank();
+  const pb = getPowerBreakdown();
+  const need = next ? getRequiredPowerFor(next) : 0;
+  const pct = next ? Math.max(0, Math.min(1, pb.total / need)) : 1;
+  const can = next ? (pb.total >= need) : false;
+
+  rankPanel.innerHTML = `
+    <div class="title">Rank System</div>
+    <div class="row"><b>Status:</b> ${unlocked ? "Desbloqueado" : "Bloqueado (Reborn 2 necessário)"}</div>
+    <div class="row"><b>Rank Atual:</b> ${cur}${next ? ` &nbsp;•&nbsp; <span class="small">Próximo: ${next} (requer ${need} Poder)</span>` : ""}</div>
+    <div class="row"><b>Poder de Combate:</b> ${pb.total}
+      <div class="small">Skills: ${pb.skills} • Bosses: ${pb.bosses} • Conquistas: ${pb.achieves}</div>
+      ${next ? `<div class="pbar"><div style="width:${Math.floor(pct*100)}%"></div></div>` : ""}
+    </div>
+    <div class="row">
+      <button id="rankProgressBtn" ${unlocked && can ? "" : "disabled"}>${next ? `Progredir &raquo; Rank ${next}` : "Máximo atingido"}</button>
+      <button id="rankCloseBtn" style="margin-left:8px;">Fechar</button>
+    </div>`;
+  document.getElementById("rankCloseBtn")?.addEventListener("click", () => toggleRank(false));
+  const btn = document.getElementById("rankProgressBtn");
+  if (btn && unlocked && can && next){
+    btn.addEventListener("click", () => {
+      const boss = startTrial(MAP_W, MAP_H, getSafeZones());
+      if (boss){
+        flashEvent(`Prova de Rank iniciada! Derrote o Boss para obter Rank ${next}.`);
+        toggleRank(false);
+      }
+    });
+  }
+}
