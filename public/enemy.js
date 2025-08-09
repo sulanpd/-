@@ -94,6 +94,19 @@ export function enemyGainPower(e, amount){
 
 /* ---------- Bases ---------- */
 const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
+
+// Distâncias-alvo para combate à distância e cadência de tiro por tipo
+const STANDOFF = {
+  basic: 320,
+  orange: 380,
+  boss: 460
+};
+const FIRE_PROFILE = {
+  basic: { cd: 1.6, speed: 12, dmgMul: 0.35, life: 2.0 },
+  orange:{ cd: 1.2, speed: 13, dmgMul: 0.40, life: 2.2 },
+  boss:  { cd: 0.9, speed: 14, dmgMul: 0.55, life: 2.6 }
+};
+
 const BASES = {
   basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
   orange: { hp:210, dmg:14, xp:40,  radius:26, color:"#ff9c40",  speed:2.2 },
@@ -230,11 +243,28 @@ export function updateEnemies(dt, safeZones) {
       if (best) { target = best; targetType = "block"; distTarget = bestD; }
     }
 
-    // Movimento
+    // Movimento (standoff: aproxima se longe, recua se perto, strafing quando em alcance)
     if (target){
-      const d = Math.max(1, Math.hypot(target.x - e.x, target.y - e.y));
-      e.x += (target.x - e.x)/d * e.speed * 60 * dt;
-      e.y += (target.y - e.y)/d * e.speed * 60 * dt;
+      const dxT = (target.x - e.x), dyT = (target.y - e.y);
+      const d = Math.max(1, Math.hypot(dxT, dyT));
+      const desired = STANDOFF[e.type] || 340;
+      const tooFar = d > desired * 1.10;
+      const tooClose = d < desired * 0.90;
+
+      let mvx = 0, mvy = 0;
+      if (tooFar) {
+        mvx = dxT / d; mvy = dyT / d;              // aproxima
+      } else if (tooClose) {
+        mvx = -dxT / d; mvy = -dyT / d;            // recua
+      } else {
+        // strafe perpendicular
+        const sx = -dyT / d, sy = dxT / d;
+        const dir = (e._strafeDir || (Math.random() < 0.5 ? 1 : -1));
+        e._strafeDir = dir;
+        mvx = sx * dir; mvy = sy * dir;
+      }
+      e.x += mvx * e.speed * 60 * dt;
+      e.y += mvy * e.speed * 60 * dt;
     } else {
       // wander
       e.wander.t -= dt;
@@ -248,7 +278,8 @@ export function updateEnemies(dt, safeZones) {
       e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
     }
 
-    // Tiro dos laranjas (não atiram em blocos)
+    // Tiro de TODOS os inimigos (passam a lutar à distância; podem atirar em blocos também)
+     (não atiram em blocos)
     if (e.type==="orange" && target && targetType!=="block" ? distTarget < 700 : distTarget < 500) {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
