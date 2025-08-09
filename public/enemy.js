@@ -278,8 +278,8 @@ export function updateEnemies(dt, safeZones) {
       e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
     }
 
-    // Tiro de TODOS os inimigos (passam a lutar à distância; podem atirar em blocos também)
-     (não atiram em blocos)
+    // Tiro de TODOS os inimigos (passam a lutar à distância; podem atirar em blocos também)//
+     //(não atiram em blocos)//
     if (e.type==="orange" && target && targetType!=="block" ? distTarget < 700 : distTarget < 500) {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
