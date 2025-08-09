@@ -294,7 +294,7 @@ export function updateEnemies(dt, safeZones) {
         }
       }
     }
-  }
+  
 
   for (const b of shooterBullets) {
     /* extended bullet collisions */
@@ -381,7 +381,7 @@ const damageOut = Math.floor(baseDamage * enemyDmgMult);
       player.slowMult = 1;
     }
   }
-}
+
 
 export function drawEnemies(ctx, cam) {
   for (const e of enemies) {
