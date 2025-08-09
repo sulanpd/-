@@ -49,12 +49,53 @@ function enemyDisplayRank(level){
  * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
  * ===================================================================== */
 import { player, getPlayerDefPercent } from "./player.js";
+import { blocks, BLOCK_TYPES } from "./blocks.js";
 import { randInt } from "./utils.js";
 export const enemies = [];
 export const shooterBullets = [];
 export const bossProjectiles = [];
 
+function computePowerGainFromKill(v){ return Math.max(1, Math.round(v*0.1)); }
+export function enemyGainPower(e, amount){
+  e.power += Math.max(0, amount|0);
+  const nr = nextRankForPower(e.power);
+  if (nr && nr !== e.rank){ e.rank = nr; e.rankLabel = nr; applyEnemyRankBenefits(e); }
+}
+
+
 const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
+
+// === Enemy Power/Rank system ===============================================
+export const ENEMY_RANKS = ["E","E+","D","D+","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"];
+export const ENEMY_REQ = { "E":10, "E+":20, "D":35, "D+":50, "C+":70, "B":95, "B+":120, "A":150, "A+":185, "S":230, "S+":280, "SS":340, "SS+":410, "SSS":490, "SSS+":580, "U":700 };
+const ENEMY_BENEFITS = {
+  "E":   { dmg:0.02, hp:0.05 },
+  "E+":  { hp:0.07, speed:0.10 },
+  "D":   { hp:0.05, dmg:0.025, regen:0.005 },
+  "D+":  { hp:0.08, projSpeed:0.15 },
+  "C":   { dmg:0.02, regen:0.0075 },
+  "C+":  { hp:0.10, projSpeed:0.15 },
+  "B":   { dmg:0.02, hp:0.05 },
+  "B+":  { stun:0.2 },
+  "A":   { dmg:0.02, hp:0.05 },
+  "A+":  { }, // reservado
+  "S":   { dmg:0.02, hp:0.05 },
+  "S+":  { stun:0.3 },
+  "SS":  { dmg:0.02, hp:0.05 },
+  "SS+": { },
+  "SSS": { dmg:0.02, hp:0.05 },
+  "SSS+":{ ignore:0.20 },
+  "U":   { dmg:0.25, hp:0.10, secondBar:true, damageReduce2:0.20 }
+};
+function rankIndex(label){ return Math.max(0, ENEMY_RANKS.indexOf(label)); }
+function nextRankForPower(p){
+  let current = null;
+  for (const r of ENEMY_RANKS){
+    if (p >= (ENEMY_REQ[r]||Infinity)) current = r; else break;
+  }
+  return current;
+}
+
 
 const BASES = {
   basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
@@ -63,6 +104,30 @@ const BASES = {
 };
 
 function combineDR(a,b){ return 1 - (1-a)*(1-b); }
+
+function applyEnemyRankBenefits(e){
+  const b = ENEMY_BENEFITS[e.rank] || null;
+  if (!b) return;
+  if (b.hp) { const extra = Math.round(e.maxHp * b.hp); e.maxHp += extra; e.hp += extra; }
+  if (b.dmg) e.dmg = Math.round(e.dmg * (1 + b.dmg));
+  if (b.speed) e.speed *= (1 + b.speed);
+  if (b.projSpeed) e._projSpeedMult = (e._projSpeedMult||1) * (1 + b.projSpeed);
+  if (b.regen) e._regenPct = (e._regenPct||0) + b.regen;
+  if (b.stun) e._stunShot = Math.max(e._stunShot||0, b.stun);
+  if (b.ignore) e._ignoreChance = Math.max(e._ignoreChance||0, b.ignore);
+  if (b.secondBar) e.rankSecondBar = 1; // enable second HP bar
+  if (b.damageReduce2) e._secondBarDR = b.damageReduce2;
+}
+
+
+function advantageVs(targetRank, selfRank){
+  if (!targetRank || !selfRank) return 0;
+  const gap = rankIndex(selfRank) - rankIndex(targetRank);
+  if (gap <= 0) return 0;
+  // Base 25% + 5% por diferença adicional, máx 60%
+  return Math.min(0.60, 0.25 + Math.max(0, gap-1)*0.05);
+}
+
 
 function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
   let p, ok=false;
@@ -87,7 +152,7 @@ function scaleByLevel(type, level){
   return { hp, dmg, xp, levelDR, lvl };
 }
 
-export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
+export function spawnEnemy(type, mapW, mapH, safeZones, level=null, opts={}) {
   const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
   const b = BASES[type];
   const lv = level ?? randomLevelForType(type);
@@ -100,8 +165,26 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
     alive: true,
     levelDR: sc.levelDR, phaseDR: 0, dmgReduce: sc.levelDR,
     phase:1, s1cd:0, s2cd:0, lastSkillCd:0,
-    shootCd:0
+    shootCd:0,
+    power: (type==="basic"? Math.max(0, randInt(0,10)) : (type==="orange"? randInt(10,30) : (type==="boss"? 10 : 0))),
+    rank: null,
+    rankLabel: null,
+    rankSecondBar: 0,
+    wander: {tx: pos.x, ty: pos.y, t: 0}
   };
+
+  if (opts && typeof opts.forcedPower === 'number') e.power = opts.forcedPower;
+  if (opts && opts.rankLabel) { e.rank = opts.rankLabel; e.rankLabel = opts.rankLabel; }
+  // If progression boss was created by rank system, honor its settings
+  if (e.type==="boss" && e._rankTrial && e._trialTargetRank && !e.rank) {
+    e.rank = e._trialTargetRank; e.rankLabel = e._trialTargetRank;
+    if (typeof e._forcedPower === 'number') e.power = e._forcedPower;
+  }
+  // Compute initial rank from power
+  const rr = nextRankForPower(e.power);
+  if (!e.rank) e.rank = rr;
+  if (!e.rankLabel) e.rankLabel = e.rank;
+  applyEnemyRankBenefits(e);
   enemies.push(e);
   return e;
 }
@@ -127,6 +210,48 @@ export function updateEnemies(dt, safeZones) {
     const inSafe = safeZones.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.r);
     const dist   = Math.hypot(e.x - player.x, e.y - player.y);
     const detect = ENEMY_DETECT[e.type] || 650;
+    /* AI: target selection with priority Player > Enemies > Blocks */
+    let target = null, targetType = null;
+    const canChasePlayer = !inSafe && dist < detect;
+    if (canChasePlayer) { target = player; targetType = "player"; }
+    if (!target){
+      // find nearest enemy (exclude self)
+      let bestD = Infinity, best=null;
+      for (const other of enemies){
+        if (!other.alive || other===e) continue;
+        const d2 = Math.hypot(other.x - e.x, other.y - e.y);
+        if (d2 < bestD){ bestD = d2; best = other; }
+      }
+      if (best) { target = best; targetType = "enemy"; dist = bestD; }
+    }
+    if (!target){
+      // find nearest block
+      let bestD = Infinity, best=null;
+      for (const b of blocks){
+        if (!b.alive) continue;
+        const d2 = Math.hypot(b.x - e.x, b.y - e.y);
+        if (d2 < bestD){ bestD = d2; best = b; }
+      }
+      if (best) { target = best; targetType = "block"; dist = bestD; }
+    }
+
+    if (target){
+      const d = Math.max(1, Math.hypot(target.x - e.x, target.y - e.y));
+      e.x += (target.x - e.x)/d * e.speed * 60 * dt;
+      e.y += (target.y - e.y)/d * e.speed * 60 * dt;
+    } else {
+      // wander
+      e.wander.t -= dt;
+      if (e.wander.t <= 0){
+        e.wander.tx = e.x + randInt(-200,200);
+        e.wander.ty = e.y + randInt(-200,200);
+        e.wander.t = 2 + Math.random()*3;
+      }
+      const d = Math.max(1, Math.hypot(e.wander.tx - e.x, e.wander.ty - e.y));
+      e.x += (e.wander.tx - e.x)/d * e.speed * 40 * dt;
+      e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
+    }
+
 
     if (!inSafe && dist < detect) {
       const d = Math.max(1, dist);
@@ -134,15 +259,22 @@ export function updateEnemies(dt, safeZones) {
       e.y += (player.y - e.y)/d * e.speed * 60 * dt;
     }
 
-    if (e.type==="orange" && !inSafe && dist < 700) {
+    if (e.type==="orange" && target && targetType!=="block" ? dist < 700 : dist < 500) {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
         e.shootCd = 1.2;
-        const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+        const tx = (target?.x ?? player.x), ty = (target?.y ?? player.y);
+        const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx,dy)||1;
         const bulletDmg = Math.round(10 + e.dmg*0.4);
-        shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13, vy:(dy/d)*13, life:2.2, alive:true, dmg: bulletDmg });
+        const spMult = e._projSpeedMult || 1;
+        shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13*spMult, vy:(dy/d)*13*spMult, life:2.2, alive:true, dmg: bulletDmg, from:e, stun:e._stunShot||0 });
       }
     }
+      }
+    }
+
+    /* Passive regen and second bar */
+    if (e._regenPct && e.alive){ e.hp = Math.min(e.maxHp, e.hp + e.maxHp*e._regenPct*dt); }
 
     if (e.type==="boss" && !inSafe) {
       e.s1cd -= dt; e.s2cd -= dt; e.lastSkillCd -= dt;
@@ -151,12 +283,12 @@ export function updateEnemies(dt, safeZones) {
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
         if (wantS1 && (!wantS2 || Math.random()<0.6)) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10, vy:(dy/d)*10, life:2.5, alive:true, type:"trap" });
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
           e.s1cd = (e.phase>=3) ? 3 : 6;
           e.lastSkillCd = 1.5;
         } else if (wantS2) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8, vy:(dy/d)*8, life:2.8, alive:true, type:"circle" });
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
           e.s2cd = 5;
           e.lastSkillCd = 1.5;
         }
@@ -165,6 +297,8 @@ export function updateEnemies(dt, safeZones) {
   }
 
   for (const b of shooterBullets) {
+    /* extended bullet collisions */
+
     if (!b.alive) continue;
     b.x += b.vx * 60 * dt; b.y += b.vy * 60 * dt; b.life -= dt;
     if (b.life <= 0) { b.alive=false; continue; }
@@ -172,7 +306,31 @@ export function updateEnemies(dt, safeZones) {
     if (dist < (player.radius||28) + 6) {
       const def = getPlayerDefPercent();
       player.hp -= b.dmg * (1 - def);
+      if (b.stun && b.stun>0) { player.freezeTimer = Math.max(player.freezeTimer||0, b.stun); }
       b.alive = false;
+      continue;
+    }
+    // hit other enemies
+    for (const e2 of enemies){
+      if (!e2.alive) continue;
+      if (Math.hypot(b.x - e2.x, b.y - e2.y) < e2.radius + 6) {
+        // advantage if shooter has higher rank
+        const adv = advantageVs(e2.rank, b.from?.rank);
+        const ignore = (b.from?._ignoreChance||0);
+        const dr = (e2.dmgReduce||0);
+        const final = ignore>0 && Math.random()<ignore ? b.dmg*(1+adv) : b.dmg*(1 - dr)*(1+adv);
+        e2.hp -= final;
+        b.alive = false; break;
+      }
+    }
+    if (!b.alive) continue;
+    // hit blocks (simple AABB)
+    for (const k of blocks){
+      if (!k.alive) continue;
+      const half = (BLOCK_TYPES[k.type]?.size||40)/2;
+      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) {
+        k.hp -= b.dmg; k.recentHitTimer = 1.0; b.alive=false; break;
+      }
     }
 
 // ... dentro da função que calcula dano do inimigo:
@@ -194,7 +352,24 @@ const damageOut = Math.floor(baseDamage * enemyDmgMult);
         player.slowMult = Math.min(player.slowMult, 0.5);
         player.circleTimer = 4;
       }
-      p.alive=false;
+      p.alive=false; continue;
+    }
+    // hit other enemies
+    for (const e2 of enemies){ if (!e2.alive) continue;
+      if (Math.hypot(p.x - e2.x, p.y - e2.y) < e2.radius + rad) {
+        const adv = advantageVs(e2.rank, p.from?.rank);
+        const ignore = (p.from?._ignoreChance||0);
+        const dr = (e2.dmgReduce||0);
+        const base = (p.type==="circle"? 35 : 28);
+        const dmg = ignore>0 && Math.random()<ignore ? base*(1+adv) : base*(1 - dr)*(1+adv);
+        e2.hp -= dmg; p.alive=false; break;
+      }
+    }
+    if (!p.alive) continue;
+    // hit blocks
+    for (const k of blocks){ if (!k.alive) continue;
+      const half = (BLOCK_TYPES[k.type]?.size||40)/2;
+      if (Math.abs(p.x - k.x) <= half + rad && Math.abs(p.y - k.y) <= half + rad) { k.hp -= (p.type==="circle"? 35:28); k.recentHitTimer=1.0; p.alive=false; break; }
     }
   }
 
@@ -215,6 +390,9 @@ export function drawEnemies(ctx, cam) {
 
     ctx.fillStyle = e.color;
     ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
+
+    // rank badge
+    if (typeof drawRankBadge === 'function' && e.rank){ drawRankBadge(ctx, sx, sy - e.radius - 24, e.rank, {height:18, font:"bold 12px Arial"}); }
 
     const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
@@ -237,6 +415,8 @@ export function drawEnemies(ctx, cam) {
 
   ctx.fillStyle="#ffffff";
   for (const b of shooterBullets) {
+    /* extended bullet collisions */
+
     if (!b.alive) continue;
     const sx=Math.floor(b.x-cam.x), sy=Math.floor(b.y-cam.y);
     ctx.beginPath(); ctx.arc(sx,sy,6,0,Math.PI*2); ctx.fill();
@@ -250,3 +430,5 @@ export function drawEnemies(ctx, cam) {
     ctx.arc(sx,sy,p.type==="circle"?14:8,0,Math.PI*2); ctx.fill();
   }
 }
+
+export function enemyRankAdvantage(attackerRank, defenderRank){ return advantageVs(defenderRank, attackerRank); }

@@ -101,6 +101,8 @@ export function startTrial(mapW, mapH, safeZones){
   const boss = spawnBoss(mapW, mapH, safeZones, player.level);
   boss._rankTrial = true;
   boss._trialTargetRank = next;
+  boss._rankLabel = next;
+  boss._forcedPower = getRequiredPowerFor(next);
   state.activeTrial = { targetRank: next, bossRef: boss };
   return boss;
 }
@@ -147,3 +149,5 @@ export function tickRankSystem(){
   recomputeSkillPower();
   applyRankBonusesToPlayer();
 }
+
+export { RANK_REQUIREMENTS };

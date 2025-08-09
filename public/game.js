@@ -29,7 +29,7 @@ import {
   getPlayerDefPercent, getShieldDefPercent, getPlayerBonusXP, xpToNext, getPlayerMilestoneSummary,
   doReborn
 } from "./player.js";
-import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies } from "./enemy.js";
+import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies, enemyGainPower, enemyRankAdvantage } from "./enemy.js";
 import { blocks, BLOCK_TYPES, spawnBlock, drawBlocks, updateBlocksHitTimers } from "./blocks.js";
 import { playerBullets, spawnPlayerBullet, updatePlayerBullets, drawPlayerBullets, setProjectileRangeMult } from "./projectiles.js";
 import { clamp } from "./utils.js";
@@ -382,6 +382,16 @@ function updateRespawns(dt) {
   } else accBoss = 0;
 }
 
+
+function awardNearestEnemyPower(x,y, amount){
+  let best=null, bestD=Infinity;
+  for (const e of enemies){ if (!e.alive) continue;
+    const d = Math.hypot(e.x - x, e.y - y);
+    if (d < bestD){ bestD=d; best=e; }
+  }
+  if (best) enemyGainPower(best, Math.max(1, Math.round(amount)));
+}
+
 /* ---------- Dano ao Player ---------- */
 function dealDamageToPlayer(raw) {
   if (raw <= 0) return;
@@ -480,6 +490,34 @@ function updateCollisions(dt) {
 
   // contato com inimigos
   for (const e of enemies) {
+    /* enemy vs enemy & blocks */
+    // enemies collide with other enemies/blocks causing damage and gaining power on kills
+    for (const other of enemies){
+      if (!other.alive || other===e) continue;
+      const d = Math.hypot(e.x - other.x, e.y - other.y);
+      if (d < e.radius + other.radius){
+        // damage each other slightly per tick
+        const adv = enemyRankAdvantage(e.rank, other.rank);
+        const advOther = enemyRankAdvantage(other.rank, e.rank);
+        const de = e.dmg * 0.5 * (1+adv) * dt;
+        const do_ = other.dmg * 0.5 * (1+advOther) * dt;
+        other.hp -= de * (1 - (other.dmgReduce||0));
+        if (other.hp <= 0){ other.alive=false; awardNearestEnemyPower(other.x, other.y, Math.max(3, Math.floor((other.xpReward||20)*0.5))); }
+        e.hp -= do_ * (1 - (e.dmgReduce||0));
+      }
+    }
+    // enemy touching blocks
+    for (const b of blocks){
+      if (!b.alive) continue;
+      const half = (BLOCK_TYPES[b.type]?.size||40)/2;
+      const dx = b.x - e.x, dy = b.y - e.y; const dist = Math.hypot(dx,dy);
+      if (dist < half + e.radius){
+        // Enemy scratches the block
+        b.hp -= e.dmg * 0.4 * dt; b.recentHitTimer = 1.0;
+        if (b.hp <= 0){ b.alive=false; const xp = b.xpReward || (BLOCK_TYPES[b.type]?.xp||0); awardNearestEnemyPower(b.x,b.y, Math.max(1, Math.floor((xp||10)*0.5))); }
+      }
+    }
+
     if (!e.alive) continue;
     const dist = Math.hypot(player.x - e.x, player.y - e.y);
     if (dist < (player.radius||28) + e.radius) {
