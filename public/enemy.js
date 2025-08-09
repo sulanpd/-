@@ -1,8 +1,33 @@
+function drawRankBadge(ctx, x, y, text, opts){
+  if (!text) return;
+  const padX = (opts?.padX ?? 6);
+  const padY = (opts?.padY ?? 3);
+  ctx.save();
+  ctx.font = (opts?.font ?? "bold 13px Arial");
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const textW = Math.ceil(ctx.measureText(text).width);
+  const w = textW + padX*2;
+  const h = (opts?.height ?? 20);
+  const rx = Math.round(x - w/2);
+  const ry = Math.round(y - h/2);
+  ctx.fillStyle = (opts?.bg ?? "rgba(0,0,0,0.55)");
+  ctx.fillRect(rx, ry, w, h);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = (opts?.stroke ?? "#6aa3ff");
+  ctx.strokeRect(rx+0.5, ry+0.5, w-1, h-1);
+  ctx.fillStyle = (opts?.fg ?? "#e3f1ff");
+  ctx.fillText(text, x, ry + h/2);
+  ctx.restore();
+}
+
 /* ========================================================================
- * enemy.js — inimigos, projéteis e skills do boss (com Safe Zone e DR corretos)
+ * enemy.js
+ * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
  * ===================================================================== */
-import { player, getPlayerDefPercent, getShieldDefPercent } from "./player.js";
+import { player, getPlayerDefPercent } from "./player.js";
 import { randInt } from "./utils.js";
+import { getEnemyRankMultipliers } from "./rankSystem.js";
 
 export const enemies = [];
 export const shooterBullets = [];
@@ -17,9 +42,10 @@ const BASES = {
 };
 
 function combineDR(a,b){ return 1 - (1-a)*(1-b); }
+
 function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
   let p, ok=false;
-  for (let i=0;i<64 && !ok;i++){
+  for (let i=0;i<50 && !ok;i++){
     p = { x: Math.random()*mapW, y: Math.random()*mapH };
     ok = !safeZones.some(s => Math.hypot(p.x-s.x, p.y-s.y) < s.r + pad);
   }
@@ -40,54 +66,29 @@ function scaleByLevel(type, level){
   return { hp, dmg, xp, levelDR, lvl };
 }
 
-/* ---------- Dano ao player com DR/escudo (sem depender de game.js) ---------- */
-function applyDamageToPlayer(raw){
-  if (raw <= 0) return;
-  if (player.ignoreChance > 0 && Math.random() < player.ignoreChance) return;
-
-  const baseDef = getPlayerDefPercent();
-  let totalDR = combineDR(baseDef, player.rebornExtraDR || 0);
-  totalDR = combineDR(totalDR, player.rankExtraDR || 0);
-  totalDR = Math.max(0, Math.min(0.95, totalDR));
-
-  let remaining = raw;
-  if (player.shield > 0) {
-    const shieldDR = Math.max(totalDR, getShieldDefPercent());
-    const dmgToShield = remaining * (1 - shieldDR);
-    const taken = Math.min(player.shield, dmgToShield);
-    player.shield -= taken;
-    remaining -= taken;
-    if (remaining <= 0) return;
-  }
-  player.hp -= remaining * (1 - totalDR);
-}
-
-/* ---------- Spawns ---------- */
 export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
   const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
   const b = BASES[type];
   const lv = level ?? randomLevelForType(type);
   const sc = scaleByLevel(type, lv);
+enemy.enemyRank = enemy.enemyRank || "NonRank"; // padrão
   const e = {
     x: pos.x, y: pos.y, type, level: sc.lvl,
     radius: b.radius, color: b.color,
-    maxHp: sc.hp, hp: sc.hp,
-    dmg: sc.dmg, xp: sc.xp,
-    speed: b.speed, alive: true,
-    levelDR: sc.levelDR, dmgReduce: sc.levelDR,
-    shootCd: 0,
-    phase: 1, s1cd: 4.0, s2cd: 7.0, lastSkillCd: 0,
-    _rankTrial: false, _trialTargetRank: null
+    maxHp: sc.hp, hp: sc.hp, speed: b.speed,
+    baseDmg: b.dmg, dmg: sc.dmg, xpReward: sc.xp,
+    alive: true,
+    levelDR: sc.levelDR, phaseDR: 0, dmgReduce: sc.levelDR,
+    phase:1, s1cd:0, s2cd:0, lastSkillCd:0,
+    shootCd:0
   };
   enemies.push(e);
   return e;
 }
-export function spawnBoss(mapW, mapH, safeZones, level=null) {
-  const levelBoss = level ?? randInt(15, 60);
-  return spawnEnemy("boss", mapW, mapH, safeZones, levelBoss);
+export function spawnBoss(mapW, mapH, safeZones, level=null){
+  return spawnEnemy("boss", mapW, mapH, safeZones, level);
 }
 
-/* ---------- Update ---------- */
 export function updateEnemies(dt, safeZones) {
   for (const e of enemies) {
     if (!e.alive) continue;
@@ -95,15 +96,18 @@ export function updateEnemies(dt, safeZones) {
     if (e.type==="boss") {
       if (e.hp <= e.maxHp*0.6 && e.phase < 2) e.phase = 2;
       if (e.hp <= e.maxHp*0.4 && e.phase < 3) {
-        e.phase = 3; e.dmgReduce = combineDR(e.levelDR, 0.5);
-        e.s1cd = Math.min(e.s1cd, 3); e.speed *= 1.25;
+        e.phase = 3;
+        e.phaseDR = 0.5;
+        e.dmgReduce = combineDR(e.levelDR, e.phaseDR);
+        e.s1cd = Math.min(e.s1cd, 3);
+        e.speed *= 1.3;
       }
     }
 
     const inSafe = safeZones.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.r);
-
-    const dist = Math.hypot(e.x - player.x, e.y - player.y);
+    const dist   = Math.hypot(e.x - player.x, e.y - player.y);
     const detect = ENEMY_DETECT[e.type] || 650;
+
     if (!inSafe && dist < detect) {
       const d = Math.max(1, dist);
       e.x += (player.x - e.x)/d * e.speed * 60 * dt;
@@ -125,23 +129,18 @@ export function updateEnemies(dt, safeZones) {
       if (e.lastSkillCd <= 0) {
         const wantS1 = e.s1cd <= 0;
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
-        if (wantS1 && (!wantS2 || Math.random() < 0.6)) {
+        if (wantS1 && (!wantS2 || Math.random()<0.6)) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10, vy:(dy/d)*10, life:2.5, alive:true, type:"trap", dmg: Math.round(e.dmg*1.1) });
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10, vy:(dy/d)*10, life:2.5, alive:true, type:"trap" });
           e.s1cd = (e.phase>=3) ? 3 : 6;
-          e.lastSkillCd = 1.4;
+          e.lastSkillCd = 1.5;
         } else if (wantS2) {
           const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8, vy:(dy/d)*8, life:2.8, alive:true, type:"circle", dmg: Math.round(e.dmg*1.4) });
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8, vy:(dy/d)*8, life:2.8, alive:true, type:"circle" });
           e.s2cd = 5;
-          e.lastSkillCd = 1.4;
+          e.lastSkillCd = 1.5;
         }
       }
-    }
-
-    const overlap = (e.radius + (player.radius||28)) - dist;
-    if (overlap > 0) {
-      applyDamageToPlayer(e.dmg * dt);
     }
   }
 
@@ -151,9 +150,15 @@ export function updateEnemies(dt, safeZones) {
     if (b.life <= 0) { b.alive=false; continue; }
     const dist = Math.hypot(b.x - player.x, b.y - player.y);
     if (dist < (player.radius||28) + 6) {
-      applyDamageToPlayer(b.dmg);
+      const def = getPlayerDefPercent();
+      player.hp -= b.dmg * (1 - def);
       b.alive = false;
     }
+
+// ... dentro da função que calcula dano do inimigo:
+const { enemyDmgMult } = getEnemyRankMultipliers(enemy.enemyRank);
+const damageOut = Math.floor(baseDamage * enemyDmgMult);
+
   }
 
   for (const p of bossProjectiles) {
@@ -163,27 +168,25 @@ export function updateEnemies(dt, safeZones) {
     const dist = Math.hypot(p.x - player.x, p.y - player.y);
     const rad = p.type==="circle" ? 14 : 8;
     if (dist < (player.radius||28) + rad) {
-      applyDamageToPlayer(p.dmg);
-      p.alive = false;
+      if (p.type==="trap") {
+        player.freezeTimer = Math.max(player.freezeTimer, 1.5);
+      } else if (p.type==="circle") {
+        player.defDebuff = Math.max(player.defDebuff, 0.25);
+        player.slowMult = Math.min(player.slowMult, 0.5);
+        player.circleTimer = 4;
+      }
+      p.alive=false;
     }
   }
-}
 
-/* ---------- Draw ---------- */
-function drawRankBadge(ctx, x, yTop, text){
-  if (!text) return 0;
-  ctx.save();
-  ctx.font = "bold 12px Arial";
-  const padX=6, padY=3;
-  const w = Math.floor(ctx.measureText(text).width) + padX*2;
-  const h = 18;
-  const rx = Math.round(x - w/2), ry = Math.round(yTop - h);
-  ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(rx, ry, w, h);
-  ctx.strokeStyle = "#6aa3ff"; ctx.strokeRect(rx, ry, w, h);
-  ctx.fillStyle = "#bfe0ff"; ctx.textBaseline = "middle";
-  ctx.fillText(text, rx + padX, ry + h/2);
-  ctx.restore();
-  return h; // return height for stacking
+  if (player.circleTimer !== undefined) {
+    player.circleTimer -= dt;
+    if (player.circleTimer <= 0) {
+      player.circleTimer = 0;
+      player.defDebuff = 0;
+      player.slowMult = 1;
+    }
+  }
 }
 
 export function drawEnemies(ctx, cam) {
@@ -195,7 +198,6 @@ export function drawEnemies(ctx, cam) {
     ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
 
     const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
-    let yTop = sy - e.radius - 20;
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
     ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w*pct, 6);
 
@@ -207,9 +209,6 @@ export function drawEnemies(ctx, cam) {
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(`Lv ${e.level}`, sx, sy - e.radius - 24);
-
-    const rankText = (e._trialTargetRank ? `Rank ${e._trialTargetRank}` : (e.enemyRank ? `Rank ${e.enemyRank}` : (e.type==='boss' ? 'BOSS' : '')));
-    if (rankText) drawRankBadge(ctx, sx, sy - e.radius - 24, rankText);
   }
 
   ctx.fillStyle="#ffffff";
