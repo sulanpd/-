@@ -270,8 +270,7 @@ export function updateEnemies(dt, safeZones) {
         shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13*spMult, vy:(dy/d)*13*spMult, life:2.2, alive:true, dmg: bulletDmg, from:e, stun:e._stunShot||0 });
       }
     }
-      }
-    }
+  }
 
     /* Passive regen and second bar */
     if (e._regenPct && e.alive){ e.hp = Math.min(e.maxHp, e.hp + e.maxHp*e._regenPct*dt); }
@@ -281,20 +280,21 @@ export function updateEnemies(dt, safeZones) {
       if (e.lastSkillCd <= 0) {
         const wantS1 = e.s1cd <= 0;
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
-        if (wantS1 && (!wantS2 || Math.random()<0.6)) {
-          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
-          e.lastSkillCd = 1.5;
-        } else if (wantS2) {
-          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
-          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
-          e.lastSkillCd = 1.5;
+        
+if (wantS1 && (!wantS2 || Math.random()<0.6)) {
+  const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+  bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
+  e.s1cd = (e.phase>=3) ? 3 : 6;
+  e.lastSkillCd = 1.5;
+} else if (wantS2) {
+  const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+  bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
+  e.s2cd = 5;
+  e.lastSkillCd = 1.5;
+}
         }
       }
     }
-  }
 
   for (const b of shooterBullets) {
     /* extended bullet collisions */
@@ -379,7 +379,7 @@ for (const p of bossProjectiles) {
   }
 }
 
-export function drawEnemies(ctx, cam) {
+}export function drawEnemies(ctx, cam) {
   for (const e of enemies) {
     if (!e.alive) continue;
     const sx = Math.floor(e.x - cam.x), sy = Math.floor(e.y - cam.y);
