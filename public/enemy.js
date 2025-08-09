@@ -4,7 +4,6 @@
  * ===================================================================== */
 import { player, getPlayerDefPercent } from "./player.js";
 import { randInt } from "./utils.js";
-import { getEnemyRankMultipliers } from "./rankSystem.js";
 
 export const enemies = [];
 export const shooterBullets = [];
@@ -48,7 +47,6 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null) {
   const b = BASES[type];
   const lv = level ?? randomLevelForType(type);
   const sc = scaleByLevel(type, lv);
-enemy.enemyRank = enemy.enemyRank || "NonRank"; // padrão
   const e = {
     x: pos.x, y: pos.y, type, level: sc.lvl,
     radius: b.radius, color: b.color,
@@ -131,11 +129,6 @@ export function updateEnemies(dt, safeZones) {
       player.hp -= b.dmg * (1 - def);
       b.alive = false;
     }
-
-// ... dentro da função que calcula dano do inimigo:
-const { enemyDmgMult } = getEnemyRankMultipliers(enemy.enemyRank);
-const damageOut = Math.floor(baseDamage * enemyDmgMult);
-
   }
 
   for (const p of bossProjectiles) {
