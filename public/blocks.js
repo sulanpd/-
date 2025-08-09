@@ -7,9 +7,9 @@ import { randInt } from "./utils.js";
 export const blocks = [];
 
 export const BLOCK_TYPES = {
-  yellow: { color:"#f1c40f", size:40, hp: 70, dmg: 6, slow: 0.30, xp: 9999, levelMin:1,  levelMax:10 },
-  blue:   { color:"#3498db", size:50, hp:110, dmg: 9, slow: 0.40, xp: 9999, levelMin:10, levelMax:30 },
-  purple: { color:"#9b59b6", size:60, hp:160, dmg:12, slow: 0.50, xp: 30, levelMin:15, levelMax:60 }
+  yellow: { color:"#f1c40f", size:40, hp: 50, dmg: 6, slow: 0.30, xp: 30, levelMin:1,  levelMax:10 },
+  blue:   { color:"#3498db", size:50, hp:90, dmg: 9, slow: 0.40, xp: 75, levelMin:15, levelMax:30 },
+  purple: { color:"#9b59b6", size:60, hp:160, dmg:12, slow: 0.50, xp: 150, levelMin:25, levelMax:60 }
 };
 
 function rollBlockLevel(t) {
