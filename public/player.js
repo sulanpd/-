@@ -4,7 +4,7 @@
 export const player = {
   x: 0, y: 0, radius: 28, color: "#4ccfff",
   alive: true, hp: 100, maxHp: 100,
-  level: 0, xp: 0, xpToNext: 100, points: 0,
+  level: 1, xp: 0, xpToNext: 100, points: 0,
 
   dmg: 25, bodyDmg: 10, def: 0, speed: 3.2, mob: 1.0, regen: 0,
 

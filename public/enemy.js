@@ -11,24 +11,6 @@ export const shooterBullets = [];
 export const bossProjectiles = [];
 
 const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
-function drawRankBadge(ctx, x, y, text){
-  if (!text) return;
-  ctx.save();
-  ctx.font = "bold 12px Arial";
-  const padX=6, padY=2;
-  const w = Math.floor(ctx.measureText(text).width) + padX*2;
-  const h = 18;
-  const rx = x - w/2, ry = y - h;
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
-  ctx.fillRect(rx, ry, w, h);
-  ctx.strokeStyle = "#6aa3ff";
-  ctx.strokeRect(rx, ry, w, h);
-  ctx.fillStyle = "#bfe0ff";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, x - w/2 + padX, ry + h/2);
-  ctx.restore();
-}
-
 
 const BASES = {
   basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
