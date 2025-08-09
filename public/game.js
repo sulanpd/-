@@ -514,7 +514,7 @@ function renderQuests() {
         <div><b>Reborn System</b></div>
         <div class="small">
           ${player.rebornCount>=1 ? "Concluída (você já renasceu)" :
-            (active ? "Progrida até o Lv 25 para desbloquear" : "Será liberada no Lv 10")}
+            (active ? "Progrida até o Lv 25 para desbloquear" : "Quest Será liberada no Lv 10")}
         </div>
       </div>
     </div>`;
