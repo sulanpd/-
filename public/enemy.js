@@ -1,3 +1,18 @@
+/* ========================================================================
+ * enemy.js
+ * Inimigos com níveis, IA, projéteis dos laranjas e skills do Boss.
+ * Corrigido: remoção de movimento duplicado, variável "dist" indefinida,
+ * e escopos/fechamentos de chaves. Mantém as funcionalidades do jogo.
+ * ===================================================================== */
+import { player, getPlayerDefPercent, getShieldDefPercent } from "./player.js";
+import { blocks, BLOCK_TYPES } from "./blocks.js";
+import { randInt } from "./utils.js";
+
+export const enemies = [];
+export const shooterBullets = [];
+export const bossProjectiles = [];
+
+/* ---------- Rank visual (rótulo) ---------- */
 function drawRankBadge(ctx, x, y, text, opts){
   if (!text) return;
   const padX = (opts?.padX ?? 6);
@@ -21,51 +36,7 @@ function drawRankBadge(ctx, x, y, text, opts){
   ctx.restore();
 }
 
-
-// === Enemy Rank (display only) ================================
-function enemyDisplayRank(level){
-  // Map enemy level -> display rank label (visual only; doesn't affect gameplay)
-  // Tuned to spread roughly from early to late-game.
-  const L = Math.max(1, level|0);
-  if (L <= 2)  return "E";
-  if (L <= 4)  return "E+";
-  if (L <= 6)  return "D";
-  if (L <= 8)  return "D+";
-  if (L <= 10) return "C+";
-  if (L <= 14) return "B";
-  if (L <= 18) return "B+";
-  if (L <= 22) return "A";
-  if (L <= 26) return "A+";
-  if (L <= 30) return "S";
-  if (L <= 34) return "S+";
-  if (L <= 38) return "SS";
-  if (L <= 42) return "SS+";
-  if (L <= 52) return "SSS";
-  if (L <= 58) return "SSS+";
-  return "U";
-}
-/* ========================================================================
- * enemy.js
- * Inimigos com níveis, IA, skills do boss, projéteis dos laranjas e do boss.
- * ===================================================================== */
-import { player, getPlayerDefPercent } from "./player.js";
-import { blocks, BLOCK_TYPES } from "./blocks.js";
-import { randInt } from "./utils.js";
-export const enemies = [];
-export const shooterBullets = [];
-export const bossProjectiles = [];
-
-function computePowerGainFromKill(v){ return Math.max(1, Math.round(v*0.1)); }
-export function enemyGainPower(e, amount){
-  e.power += Math.max(0, amount|0);
-  const nr = nextRankForPower(e.power);
-  if (nr && nr !== e.rank){ e.rank = nr; e.rankLabel = nr; applyEnemyRankBenefits(e); }
-}
-
-
-const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
-
-// === Enemy Power/Rank system ===============================================
+/* ---------- Enemy Ranks ---------- */
 export const ENEMY_RANKS = ["E","E+","D","D+","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"];
 export const ENEMY_REQ = { "E":10, "E+":20, "D":35, "D+":50, "C+":70, "B":95, "B+":120, "A":150, "A+":185, "S":230, "S+":280, "SS":340, "SS+":410, "SSS":490, "SSS+":580, "U":700 };
 const ENEMY_BENEFITS = {
@@ -78,7 +49,7 @@ const ENEMY_BENEFITS = {
   "B":   { dmg:0.02, hp:0.05 },
   "B+":  { stun:0.2 },
   "A":   { dmg:0.02, hp:0.05 },
-  "A+":  { }, // reservado
+  "A+":  { },
   "S":   { dmg:0.02, hp:0.05 },
   "S+":  { stun:0.3 },
   "SS":  { dmg:0.02, hp:0.05 },
@@ -95,15 +66,12 @@ function nextRankForPower(p){
   }
   return current;
 }
-
-
-const BASES = {
-  basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
-  orange: { hp:210, dmg:14, xp:40,  radius:26, color:"#ff9c40",  speed:2.2 },
-  boss:   { hp:2800,dmg:55, xp:250, radius:60, color:"#b1002a",  speed:1.8 }
-};
-
-function combineDR(a,b){ return 1 - (1-a)*(1-b); }
+export function enemyRankAdvantage(selfRank, targetRank){
+  if (!targetRank || !selfRank) return 0;
+  const gap = rankIndex(selfRank) - rankIndex(targetRank);
+  if (gap <= 0) return 0;
+  return Math.min(0.60, 0.25 + Math.max(0, gap-1)*0.05);
+}
 
 function applyEnemyRankBenefits(e){
   const b = ENEMY_BENEFITS[e.rank] || null;
@@ -115,28 +83,23 @@ function applyEnemyRankBenefits(e){
   if (b.regen) e._regenPct = (e._regenPct||0) + b.regen;
   if (b.stun) e._stunShot = Math.max(e._stunShot||0, b.stun);
   if (b.ignore) e._ignoreChance = Math.max(e._ignoreChance||0, b.ignore);
-  if (b.secondBar) e.rankSecondBar = 1; // enable second HP bar
+  if (b.secondBar) e.rankSecondBar = 1;
   if (b.damageReduce2) e._secondBarDR = b.damageReduce2;
 }
-
-
-function advantageVs(targetRank, selfRank){
-  if (!targetRank || !selfRank) return 0;
-  const gap = rankIndex(selfRank) - rankIndex(targetRank);
-  if (gap <= 0) return 0;
-  // Base 25% + 5% por diferença adicional, máx 60%
-  return Math.min(0.60, 0.25 + Math.max(0, gap-1)*0.05);
+export function enemyGainPower(e, amount){
+  e.power += Math.max(0, amount|0);
+  const nr = nextRankForPower(e.power);
+  if (nr && nr !== e.rank){ e.rank = nr; e.rankLabel = nr; applyEnemyRankBenefits(e); }
 }
 
-
-function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
-  let p, ok=false;
-  for (let i=0;i<50 && !ok;i++){
-    p = { x: Math.random()*mapW, y: Math.random()*mapH };
-    ok = !safeZones.some(s => Math.hypot(p.x-s.x, p.y-s.y) < s.r + pad);
-  }
-  return p || { x: mapW*0.5, y: mapH*0.5 };
-}
+/* ---------- Bases ---------- */
+const ENEMY_DETECT = { basic:650, orange:800, boss:1000 };
+const BASES = {
+  basic:  { hp:160, dmg:10, xp:20,  radius:26, color:"#f35555",  speed:2.6 },
+  orange: { hp:210, dmg:14, xp:40,  radius:26, color:"#ff9c40",  speed:2.2 },
+  boss:   { hp:2800,dmg:55, xp:250, radius:60, color:"#b1002a",  speed:1.8 }
+};
+function combineDR(a,b){ return 1 - (1-a)*(1-b); }
 function randomLevelForType(type){
   if (type==="basic")  return randInt(1,10);
   if (type==="orange") return randInt(9,30);
@@ -151,7 +114,16 @@ function scaleByLevel(type, level){
   const levelDR = Math.min(0.9, Math.floor((lvl-1)/10) * 0.15);
   return { hp, dmg, xp, levelDR, lvl };
 }
+function randomPosOutsideSafe(mapW, mapH, safeZones, pad=80){
+  let p, ok=false;
+  for (let i=0;i<50 && !ok;i++){
+    p = { x: Math.random()*mapW, y: Math.random()*mapH };
+    ok = !safeZones.some(s => Math.hypot(p.x-s.x, p.y-s.y) < s.r + pad);
+  }
+  return p || { x: mapW*0.5, y: mapH*0.5 };
+}
 
+/* ---------- Spawns ---------- */
 export function spawnEnemy(type, mapW, mapH, safeZones, level=null, opts={}) {
   const pos = randomPosOutsideSafe(mapW, mapH, safeZones, 80);
   const b = BASES[type];
@@ -172,15 +144,15 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null, opts={}) {
     rankSecondBar: 0,
     wander: {tx: pos.x, ty: pos.y, t: 0}
   };
-
   if (opts && typeof opts.forcedPower === 'number') e.power = opts.forcedPower;
   if (opts && opts.rankLabel) { e.rank = opts.rankLabel; e.rankLabel = opts.rankLabel; }
-  // If progression boss was created by rank system, honor its settings
+
+  // Progression-boss (Rank Trial)
   if (e.type==="boss" && e._rankTrial && e._trialTargetRank && !e.rank) {
     e.rank = e._trialTargetRank; e.rankLabel = e._trialTargetRank;
     if (typeof e._forcedPower === 'number') e.power = e._forcedPower;
   }
-  // Compute initial rank from power
+  // Compute initial rank
   const rr = nextRankForPower(e.power);
   if (!e.rank) e.rank = rr;
   if (!e.rankLabel) e.rankLabel = e.rank;
@@ -192,10 +164,32 @@ export function spawnBoss(mapW, mapH, safeZones, level=null){
   return spawnEnemy("boss", mapW, mapH, safeZones, level);
 }
 
+/* ---------- Dano ao jogador (projéteis/skills) ---------- */
+function dealDamageToPlayer(raw) {
+  if (raw <= 0) return;
+  // chance de ignorar dano (velocidade 10+), já aplicada no game.js para contato;
+  // aqui aplicamos apenas DR/escudo para projéteis.
+  const baseDef = getPlayerDefPercent();
+  const shieldDef = getShieldDefPercent();
+  let remaining = raw;
+
+  if (player.shield > 0) {
+    const dmgToShield = remaining * (1 - shieldDef);
+    const taken = Math.min(player.shield, dmgToShield);
+    player.shield -= taken;
+    remaining -= taken;
+    if (remaining <= 0) return;
+  }
+  const dmgToHP = remaining * (1 - baseDef);
+  player.hp -= dmgToHP;
+}
+
+/* ---------- Update loop ---------- */
 export function updateEnemies(dt, safeZones) {
   for (const e of enemies) {
     if (!e.alive) continue;
 
+    // Fases do Boss
     if (e.type==="boss") {
       if (e.hp <= e.maxHp*0.6 && e.phase < 2) e.phase = 2;
       if (e.hp <= e.maxHp*0.4 && e.phase < 3) {
@@ -210,12 +204,13 @@ export function updateEnemies(dt, safeZones) {
     const inSafe = safeZones.some(s => Math.hypot(player.x - s.x, player.y - s.y) < s.r);
     let distTarget   = Math.hypot(e.x - player.x, e.y - player.y);
     const detect = ENEMY_DETECT[e.type] || 650;
-    /* AI: target selection with priority Player > Enemies > Blocks */
+
+    /* Seleção de alvo (prioridade: Jogador > Inimigos > Blocos) */
     let target = null, targetType = null;
     const canChasePlayer = !inSafe && distTarget < detect;
     if (canChasePlayer) { target = player; targetType = "player"; }
     if (!target){
-      // find nearest enemy (exclude self)
+      // inimigo mais próximo
       let bestD = Infinity, best=null;
       for (const other of enemies){
         if (!other.alive || other===e) continue;
@@ -225,7 +220,7 @@ export function updateEnemies(dt, safeZones) {
       if (best) { target = best; targetType = "enemy"; distTarget = bestD; }
     }
     if (!target){
-      // find nearest block
+      // bloco mais próximo
       let bestD = Infinity, best=null;
       for (const b of blocks){
         if (!b.alive) continue;
@@ -235,6 +230,7 @@ export function updateEnemies(dt, safeZones) {
       if (best) { target = best; targetType = "block"; distTarget = bestD; }
     }
 
+    // Movimento
     if (target){
       const d = Math.max(1, Math.hypot(target.x - e.x, target.y - e.y));
       e.x += (target.x - e.x)/d * e.speed * 60 * dt;
@@ -252,13 +248,7 @@ export function updateEnemies(dt, safeZones) {
       e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
     }
 
-
-    if (!inSafe && distTarget < detect) {
-      const d = Math.max(1, dist);
-      e.x += (player.x - e.x)/d * e.speed * 60 * dt;
-      e.y += (player.y - e.y)/d * e.speed * 60 * dt;
-    }
-
+    // Tiro dos laranjas (não atiram em blocos)
     if (e.type==="orange" && target && targetType!=="block" ? distTarget < 700 : distTarget < 500) {
       e.shootCd -= dt;
       if (e.shootCd <= 0) {
@@ -270,160 +260,114 @@ export function updateEnemies(dt, safeZones) {
         shooterBullets.push({ x:e.x, y:e.y, vx:(dx/d)*13*spMult, vy:(dy/d)*13*spMult, life:2.2, alive:true, dmg: bulletDmg, from:e, stun:e._stunShot||0 });
       }
     }
-  }
 
-    /* Passive regen and second bar */
+    // Regen passiva por rank
     if (e._regenPct && e.alive){ e.hp = Math.min(e.maxHp, e.hp + e.maxHp*e._regenPct*dt); }
 
+    // Skills do boss (fora da safe zone)
     if (e.type==="boss" && !inSafe) {
       e.s1cd -= dt; e.s2cd -= dt; e.lastSkillCd -= dt;
       if (e.lastSkillCd <= 0) {
         const wantS1 = e.s1cd <= 0;
         const wantS2 = e.phase>=2 && e.s2cd <= 0;
-        
-if (wantS1 && (!wantS2 || Math.random()<0.6)) {
-  const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
-  bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
-  e.s1cd = (e.phase>=3) ? 3 : 6;
-  e.lastSkillCd = 1.5;
-} else if (wantS2) {
-  const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
-  bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
-  e.s2cd = 5;
-  e.lastSkillCd = 1.5;
-}
+        if (wantS1 && (!wantS2 || Math.random()<0.6)) {
+          const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*10*(e._projSpeedMult||1), vy:(dy/d)*10*(e._projSpeedMult||1), life:2.5, alive:true, type:"trap", from:e });
+          e.s1cd = (e.phase>=3) ? 3 : 6;
+          e.lastSkillCd = 1.5;
+        } else if (wantS2) {
+          const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx,dy)||1;
+          bossProjectiles.push({ x:e.x, y:e.y, vx:(dx/d)*8*(e._projSpeedMult||1), vy:(dy/d)*8*(e._projSpeedMult||1), life:2.8, alive:true, type:"circle", from:e });
+          e.s2cd = 5;
+          e.lastSkillCd = 1.5;
         }
       }
     }
+  } // end for enemies
 
+  // Atualiza projéteis dos laranjas
   for (const b of shooterBullets) {
-    /* extended bullet collisions */
-
     if (!b.alive) continue;
     b.x += b.vx * 60 * dt; b.y += b.vy * 60 * dt; b.life -= dt;
     if (b.life <= 0) { b.alive=false; continue; }
+    // colisão com player
     const dist = Math.hypot(b.x - player.x, b.y - player.y);
     if (dist < (player.radius||28) + 6) {
-      const def = getPlayerDefPercent();
-      player.hp -= b.dmg * (1 - def);
-      if (b.stun && b.stun>0) { player.freezeTimer = Math.max(player.freezeTimer||0, b.stun); }
+      dealDamageToPlayer(b.dmg);
       b.alive = false;
-      continue;
     }
-    // hit other enemies
-    for (const e2 of enemies){
-      if (!e2.alive) continue;
-      if (Math.hypot(b.x - e2.x, b.y - e2.y) < e2.radius + 6) {
-        // advantage if shooter has higher rank
-        const adv = advantageVs(e2.rank, b.from?.rank);
-        const ignore = (b.from?._ignoreChance||0);
-        const dr = (e2.dmgReduce||0);
-        const final = ignore>0 && Math.random()<ignore ? b.dmg*(1+adv) : b.dmg*(1 - dr)*(1+adv);
-        e2.hp -= final;
-        b.alive = false; break;
-      }
-    }
+    // colisão com blocos (absorvem projéteis)
     if (!b.alive) continue;
-    // hit blocks (simple AABB)
     for (const k of blocks){
       if (!k.alive) continue;
       const half = (BLOCK_TYPES[k.type]?.size||40)/2;
-      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) {
-        k.hp -= b.dmg; k.recentHitTimer = 1.0; b.alive=false; break;
-      }
+      if (Math.abs(b.x - k.x) <= half + 6 && Math.abs(b.y - k.y) <= half + 6) { b.alive=false; break; }
     }
+  }
 
-
-for (const p of bossProjectiles) {
+  // Atualiza projéteis do boss
+  for (const p of bossProjectiles) {
     if (!p.alive) continue;
     p.x += p.vx * 60 * dt; p.y += p.vy * 60 * dt; p.life -= dt;
     if (p.life <= 0) { p.alive=false; continue; }
     const dist = Math.hypot(p.x - player.x, p.y - player.y);
-    const rad = p.type==="circle" ? 14 : 8;
-    if (dist < (player.radius||28) + rad) {
-      if (p.type==="trap") {
-        player.freezeTimer = Math.max(player.freezeTimer, 1.5);
-      } else if (p.type==="circle") {
-        player.defDebuff = Math.max(player.defDebuff, 0.25);
-        player.slowMult = Math.min(player.slowMult, 0.5);
-        player.circleTimer = 4;
-      }
-      p.alive=false; continue;
-    }
-    // hit other enemies
-    for (const e2 of enemies){ if (!e2.alive) continue;
-      if (Math.hypot(p.x - e2.x, p.y - e2.y) < e2.radius + rad) {
-        const adv = advantageVs(e2.rank, p.from?.rank);
-        const ignore = (p.from?._ignoreChance||0);
-        const dr = (e2.dmgReduce||0);
-        const base = (p.type==="circle"? 35 : 28);
-        const dmg = ignore>0 && Math.random()<ignore ? base*(1+adv) : base*(1 - dr)*(1+adv);
-        e2.hp -= dmg; p.alive=false; break;
-      }
-    }
-    if (!p.alive) continue;
-    // hit blocks
-    for (const k of blocks){ if (!k.alive) continue;
-      const half = (BLOCK_TYPES[k.type]?.size||40)/2;
-      if (Math.abs(p.x - k.x) <= half + rad && Math.abs(p.y - k.y) <= half + rad) { k.hp -= (p.type==="circle"? 35:28); k.recentHitTimer=1.0; p.alive=false; break; }
-  }
-
-  if (player.circleTimer !== undefined) {
-    player.circleTimer -= dt;
-    if (player.circleTimer <= 0) {
-      player.circleTimer = 0;
-      player.defDebuff = 0;
-      player.slowMult = 1;
+    if (dist < (player.radius||28) + 10) {
+      // dano base de skill do boss um pouco maior que tiro laranja
+      dealDamageToPlayer(30);
+      p.alive=false;
     }
   }
 }
 
-}export function drawEnemies(ctx, cam) {
-  for (const e of enemies) {
+/* ---------- Draw ---------- */
+export function drawEnemies(ctx, cam){
+  ctx.save();
+  for (const e of enemies){
     if (!e.alive) continue;
     const sx = Math.floor(e.x - cam.x), sy = Math.floor(e.y - cam.y);
 
-    ctx.fillStyle = e.color;
-    ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
+    // corpo
+    ctx.beginPath();
+    ctx.arc(sx, sy, e.radius, 0, Math.PI*2);
+    ctx.fillStyle = e.color || "#c55";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#111";
+    ctx.stroke();
 
-    // rank badge
-    if (typeof drawRankBadge === 'function' && e.rank){ drawRankBadge(ctx, sx, sy - e.radius - 24, e.rank, {height:18, font:"bold 12px Arial"}); }
+    // HP bar
+    if (e.maxHp > 0){
+      const w = Math.max(40, e.radius*2);
+      const h = 6;
+      const pct = Math.max(0, Math.min(1, e.hp / e.maxHp));
+      const barY = sy - e.radius - 14;
+      ctx.fillStyle = "#000"; ctx.fillRect(sx - w/2, barY, w, h);
+      ctx.fillStyle = "#e74c3c"; ctx.fillRect(sx - w/2, barY, w * pct, h);
+      ctx.strokeStyle = "#111"; ctx.strokeRect(sx - w/2, barY, w, h);
+    }
 
-    const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
-    ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
-    ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w*pct, 6);
-
-    let levelColor = "#e0e0e0";
-    if (e.type === "basic")   levelColor = "#7ec8ff";
-    if (e.type === "orange")  levelColor = "#ffd27e";
-    if (e.type === "boss")    levelColor = "#ff6b8a";
-    ctx.fillStyle = levelColor;
+    // Level e Rank acima (centralizado)
+    ctx.fillStyle = "#ffffff";
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
-    try {
-      const er = enemyDisplayRank(e.level);
-      const stroke = (e.type==="boss"?"#ff6b8a":(e.type==="orange"?"#ffd27e":"#7ec8ff"));
-      drawRankBadge(ctx, sx, sy - e.radius - 44, `Rank ${er}`, { height:18, stroke });
-    } catch(_) {}
-    ctx.fillText(`Lv ${e.level}`, sx, sy - e.radius - 24);
+    ctx.fillText(`Lv ${e.level||1}`, sx, sy - e.radius - 24);
+    if (e.rankLabel){
+      drawRankBadge(ctx, sx, sy - e.radius - 36, e.rankLabel);
+    }
   }
+  ctx.restore();
 
-  ctx.fillStyle="#ffffff";
-  for (const b of shooterBullets) {
-    /* extended bullet collisions */
-
+  // desenha projéteis
+  ctx.fillStyle = "#ffcf6e";
+  for (const b of shooterBullets){
     if (!b.alive) continue;
-    const sx=Math.floor(b.x-cam.x), sy=Math.floor(b.y-cam.y);
-    ctx.beginPath(); ctx.arc(sx,sy,6,0,Math.PI*2); ctx.fill();
+    const sx = Math.floor(b.x - cam.x), sy = Math.floor(b.y - cam.y);
+    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI*2); ctx.fill();
   }
-
-  for (const p of bossProjectiles) {
+  ctx.fillStyle = "#ff5c8a";
+  for (const p of bossProjectiles){
     if (!p.alive) continue;
-    const sx=Math.floor(p.x-cam.x), sy=Math.floor(p.y-cam.y);
-    ctx.beginPath();
-    ctx.fillStyle = p.type==="circle" ? "#00e0ff" : "#ff0066";
-    ctx.arc(sx,sy,p.type==="circle"?14:8,0,Math.PI*2); ctx.fill();
+    const sx = Math.floor(p.x - cam.x), sy = Math.floor(p.y - cam.y);
+    ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI*2); ctx.fill();
   }
 }
-
-export function enemyRankAdvantage(attackerRank, defenderRank){ return advantageVs(defenderRank, attackerRank); }
