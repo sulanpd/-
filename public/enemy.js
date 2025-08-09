@@ -170,17 +170,20 @@ export function updateEnemies(dt, safeZones) {
 }
 
 /* ---------- Draw ---------- */
-function drawRankBadge(ctx, x, y, text){
-  if (!text) return;
+function drawRankBadge(ctx, x, yTop, text){
+  if (!text) return 0;
   ctx.save();
   ctx.font = "bold 12px Arial";
-  const padX=6, w = Math.floor(ctx.measureText(text).width) + padX*2;
-  const h = 18, rx = x - w/2, ry = y - h;
-  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(rx, ry, w, h);
+  const padX=6, padY=3;
+  const w = Math.floor(ctx.measureText(text).width) + padX*2;
+  const h = 18;
+  const rx = Math.round(x - w/2), ry = Math.round(yTop - h);
+  ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(rx, ry, w, h);
   ctx.strokeStyle = "#6aa3ff"; ctx.strokeRect(rx, ry, w, h);
   ctx.fillStyle = "#bfe0ff"; ctx.textBaseline = "middle";
-  ctx.fillText(text, x - w/2 + padX, ry + h/2);
+  ctx.fillText(text, rx + padX, ry + h/2);
   ctx.restore();
+  return h; // return height for stacking
 }
 
 export function drawEnemies(ctx, cam) {
@@ -192,6 +195,7 @@ export function drawEnemies(ctx, cam) {
     ctx.beginPath(); ctx.arc(sx, sy, e.radius, 0, Math.PI*2); ctx.fill();
 
     const w = e.radius*2, pct = Math.max(0, e.hp / e.maxHp);
+    let yTop = sy - e.radius - 20;
     ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w, 6);
     ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - e.radius - 16, w*pct, 6);
 

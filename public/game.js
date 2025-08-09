@@ -19,6 +19,23 @@ import {
 /* ---------- Canvas / Mapa ---------- */
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+
+function drawRankBadge(ctx, x, yTop, text){
+  if (!text) return 0;
+  ctx.save();
+  ctx.font = "bold 12px Arial";
+  const padX=6, padY=3;
+  const w = Math.floor(ctx.measureText(text).width) + padX*2;
+  const h = 18;
+  const rx = Math.round(x - w/2), ry = Math.round(yTop - h);
+  ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(rx, ry, w, h);
+  ctx.strokeStyle = "#6aa3ff"; ctx.strokeRect(rx, ry, w, h);
+  ctx.fillStyle = "#bfe0ff"; ctx.textBaseline = "middle";
+  ctx.fillText(text, rx + padX, ry + h/2);
+  ctx.restore();
+  return h;
+}
+
 let viewW = window.innerWidth, viewH = window.innerHeight;
 canvas.width = viewW; canvas.height = viewH;
 let MAP_W = viewW * 3, MAP_H = viewH * 3;
@@ -630,6 +647,13 @@ function drawPlayer() {
     ctx.fillStyle="#7ec8ff"; ctx.fillRect(sx - w/2, sy - r - 26, w * pctS, h);
     ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 26, w, h);
   }
+
+  // Badge de Rank do jogador
+  try {
+    const pr = (typeof getCurrentRank === 'function') ? getCurrentRank() : null;
+    const label = pr ? `Rank ${pr}` : `Sem Rank`;
+    drawRankBadge(ctx, sx, sy - r - 42, label);
+  } catch(e){}
 
   // Barra de HP
   if (player.maxHp) {
