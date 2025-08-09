@@ -129,7 +129,7 @@ export function doReborn(classChoice, BASES, safeZones) {
   }
 
   // Reset progressão
-  player.level = 1;
+  player.level = 0;
   player.xp = 0;
   player.xpToNext = xpToNext(1);
   player.points = 0;
