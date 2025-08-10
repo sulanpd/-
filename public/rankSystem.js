@@ -38,7 +38,7 @@ const RANK_REQUIREMENTS = {
 "U": 50000
 };
 /* ---------- Boss de progressão: níveis fixos por Rank ---------- */
-export const PROGRESSION_BOSS_FIXED_LEVEL = {
+export const PROGRESSION_BOSS_FIXED_LEVEL_LEVEL = {
   "E": 5,
   "E+": 15,
   "D": 25,
@@ -133,7 +133,7 @@ export function startTrial(mapW, mapH, safeZones){
   const next = getNextRank();
   if (!next) return null;
   // Nasce Boss de progressão com NÍVEL FIXO por Rank (fallback: nível do jogador)
-  const fixedLvl = PROGRESSION_BOSS_FIXED_LEVEL[next] ?? player.level;
+  const fixedLvl = PROGRESSION_BOSS_FIXED_LEVEL_LEVEL[next] ?? player.level;
   const boss = spawnBoss(mapW, mapH, safeZones, fixedLvl);
   boss._rankTrial = true;
   boss._trialTargetRank = next;

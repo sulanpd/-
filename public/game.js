@@ -1007,7 +1007,55 @@ function classTick(dt) {
       // Consome barra durante o modo ativo
       player.classBar = Math.max(0, (player.classBar || 0) - 1.5 * dt);
       if (player.classBar <= 0) { player.skillModeActive = false; }
-    } else {
+    
+
+/* --- FIX: tickClassBuffs — atualiza e aplica efeitos temporários das classes --- */
+function tickClassBuffs(dt) {
+  // estrutura segura
+  if (!player.classBuffs) player.classBuffs = {};
+  // Berserker: roubo de vida temporário durante a duração
+  if (player.classBuffs.berserkLeech && player.classBuffs.berserkLeech > 0) {
+    player.classBuffs.berserkLeech = Math.max(0, player.classBuffs.berserkLeech - dt);
+    if (player.classBuffs.berserkLeech === 0) delete player.classBuffs.berserkLeech;
+  }
+  // Ladino: crítico aumentado temporário
+  if (player.classBuffs.ladinoCrit && player.classBuffs.ladinoCrit > 0) {
+    player.classBuffs.ladinoCrit = Math.max(0, player.classBuffs.ladinoCrit - dt);
+    if (player.classBuffs.ladinoCrit === 0) delete player.classBuffs.ladinoCrit;
+  }
+  // Ladino: Rajada — dispara lotes automaticamente
+  if (player.classBuffs.ladinoBurst) {
+    const b = player.classBuffs.ladinoBurst;
+    b.timer = (b.timer || 0) - dt;
+    if (b.remaining > 0 && b.timer <= 0) {
+      // dispara "batch" projéteis numa pequena dispersão em direção ao mouse
+      for (let i = 0; i < (b.batch || 4); i++) {
+        const spread = (Math.random() * 0.35) - 0.175; // +-10 graus aprox
+        const dx = mouseWX - player.x, dy = mouseWY - player.y;
+        const ang = Math.atan2(dy, dx) + spread;
+        const tx = player.x + Math.cos(ang), ty = player.y + Math.sin(ang);
+        const baseDmg = Math.max(1, player.dmg);
+        spawnPlayerBullet(player.x, player.y, tx, ty, 18, baseDmg * 1.2);
+      }
+      b.remaining -= 1;
+      b.timer = b.gap || 0.5;
+    }
+    if (b.remaining <= 0) delete player.classBuffs.ladinoBurst;
+  }
+  // RageTank: pilhas na mira — expiram com o tempo
+  if (player.classBuffs.rageTankStacks) {
+    const st = player.classBuffs.rageTankStacks;
+    st.timer = Math.max(0, (st.timer || 0) - dt);
+    if (st.timer === 0) delete player.classBuffs.rageTankStacks;
+  }
+  // Paladino: Fé — duração
+  if (player.classBuffs.palFaith && player.classBuffs.palFaith > 0) {
+    player.classBuffs.palFaith = Math.max(0, player.classBuffs.palFaith - dt);
+    if (player.classBuffs.palFaith === 0) delete player.classBuffs.palFaith;
+  }
+}
+
+} else {
       const max = player.classBarMax || 0;
       const cur = player.classBar || 0;
       if (player.advancedClass === "Berserker") {
