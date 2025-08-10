@@ -289,6 +289,43 @@ function drawSkillHud(){
   player.x = clamp(player.x + vx * spd, r, MAP_W - r);
   player.y = clamp(player.y + vy * spd, r, MAP_H - r);
 }
+
+// Global copy (fix): tickClassBuffs to be used in update()
+function tickClassBuffs(dt){
+  if (!player.classBuffs) return;
+  // decrement numbers
+  for (const key of Object.keys(player.classBuffs)){
+    const v = player.classBuffs[key];
+    if (typeof v === "number"){
+      player.classBuffs[key] = Math.max(0, v - dt);
+      if (player.classBuffs[key] === 0) delete player.classBuffs[key];
+    } else if (v && typeof v === "object" && v.timer !== undefined){
+      v.timer -= dt;
+      if (v.timer <= 0){
+        // Ladino burst scheduler
+        if (v.remaining > 0){
+          v.timer = v.gap;
+          v.remaining--;
+          // escolhe inimigo mais próximo
+          let bestIdx=-1, bestD=1e9;
+          for (let i=0;i<enemies.length;i++){
+            const e=enemies[i]; if(!e.alive) continue;
+            const d=Math.hypot(e.x-player.x, e.y-player.y);
+            if (d<bestD){bestD=d; bestIdx=i;}
+          }
+          if (bestIdx>=0){
+            for (let j=0;j<v.batch;j++){
+              spawnPlayerBullet(player.x, player.y, player.x+1, player.y, 18, Math.max(1,player.dmg)*1.1, {homing:true, aimId:bestIdx, life:1.6, turnRate:10, type:"ladino_burst"});
+            }
+          }
+        } else {
+          delete player.classBuffs[key];
+        }
+      }
+    }
+  }
+}
+
 function centerCameraOnPlayer() {
   cam.x = clamp(player.x - viewW / 2, 0, Math.max(0, MAP_W - viewW));
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
