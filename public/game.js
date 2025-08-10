@@ -93,7 +93,7 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
 window.addEventListener("mouseup", () => { isShooting = false; });
-canvas.addEventListener("mousemove", updat
+canvas.addEventListener("mousemove", updateMouseWorld);
 // -- Global keyboard listener (moved out of handleInput to prevent duplicate registrations) --
 if (!window.__keysListenerBound){
   window.__keysListenerBound = true;
