@@ -156,3 +156,23 @@ export function doReborn(classChoice, BASES, safeZones) {
   playerBaseStats(BASES);
   resetPlayer(safeZones);
 }
+
+/* ---------- Class Upgrade Helpers ---------- */
+export function setAdvancedClass(name){
+  player.advancedClass = name;
+  player.skillModeActive = false;
+  player.classBar = 0;
+  player.classBarMax = 100;
+  player.classBarRegen = 0;
+  player.classBuffs = {};
+  player.skillCd = {1:0,2:0,3:0,4:0};
+}
+export function gainClassBar(v){
+  if (!player.advancedClass) return;
+  player.classBar = Math.max(0, Math.min(player.classBarMax, player.classBar + v));
+}
+export function consumeClassBar(v){
+  const ok = (player.classBar >= v);
+  if (ok) player.classBar -= v;
+  return ok;
+}

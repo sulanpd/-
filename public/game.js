@@ -1,4 +1,4 @@
-function drawRankBadge(ctx, x, y, text, opts){
+function drawRankBadge(ctx, x, y, text, opts) {
   if (!text) return;
   const padX = (opts?.padX ?? 6);
   const padY = (opts?.padY ?? 3);
@@ -7,17 +7,17 @@ function drawRankBadge(ctx, x, y, text, opts){
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const textW = Math.ceil(ctx.measureText(text).width);
-  const w = textW + padX*2;
+  const w = textW + padX * 2;
   const h = (opts?.height ?? 20);
-  const rx = Math.round(x - w/2);
-  const ry = Math.round(y - h/2);
+  const rx = Math.round(x - w / 2);
+  const ry = Math.round(y - h / 2);
   ctx.fillStyle = (opts?.bg ?? "rgba(0,0,0,0.55)");
   ctx.fillRect(rx, ry, w, h);
   ctx.lineWidth = 1;
   ctx.strokeStyle = (opts?.stroke ?? "#6aa3ff");
-  ctx.strokeRect(rx+0.5, ry+0.5, w-1, h-1);
+  ctx.strokeRect(rx + 0.5, ry + 0.5, w - 1, h - 1);
   ctx.fillStyle = (opts?.fg ?? "#e3f1ff");
-  ctx.fillText(text, x, ry + h/2);
+  ctx.fillText(text, x, ry + h / 2);
   ctx.restore();
 }
 
@@ -27,7 +27,7 @@ function drawRankBadge(ctx, x, y, text, opts){
 import {
   player, resetPlayer, playerBaseStats, getPlayerRegen,
   getPlayerDefPercent, getShieldDefPercent, getPlayerBonusXP, xpToNext, getPlayerMilestoneSummary,
-  doReborn
+  doReborn, setAdvancedClass, gainClassBar, consumeClassBar
 } from "./player.js";
 import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies, enemyGainPower, enemyRankAdvantage, panicFromBossHit } from "./enemy.js";
 import { blocks, BLOCK_TYPES, spawnBlock, drawBlocks, updateBlocksHitTimers } from "./blocks.js";
@@ -81,7 +81,7 @@ let isShooting = false;
 let shootCD = 0;
 const FIRE_RATE = 0.18;
 let mouseWX = 0, mouseWY = 0;
-function updateMouseWorld(e){
+function updateMouseWorld(e) {
   const rect = canvas.getBoundingClientRect();
   mouseWX = cam.x + (e.clientX - rect.left);
   mouseWY = cam.y + (e.clientY - rect.top);
@@ -95,7 +95,7 @@ canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMou
 window.addEventListener("mouseup", () => { isShooting = false; });
 canvas.addEventListener("mousemove", updateMouseWorld);
 
-function tryShoot(){
+function tryShoot() {
   if (!player.alive) return;
   if (shootCD <= 0 && isShooting) {
     const dmg = Math.max(1, player.dmg) * playerDamageMult;
@@ -118,6 +118,134 @@ function handleInput(dt) {
   player.x = clamp(player.x + vx * spd, r, MAP_W - r);
   player.y = clamp(player.y + vy * spd, r, MAP_H - r);
 }
+
+/* ---------- Class Skills (1..4) ---------- */
+const SKILL_CD = { 1: 120, 2: 15, 3: 40, 4: 150 };
+const SKILL_DELAY_S = 0.85; // trava para 2..4
+function classTick(dt) {
+  // Regen/decay da barra por classe e estados
+  if (player.advancedClass) {
+    if (player.skillModeActive) {
+      // durante Modo 1 consome barra (1.5/s), exceto casos específicos
+      player.classBar = Math.max(0, player.classBar - 1.5 * dt);
+      if (player.classBar <= 0) { player.skillModeActive = false; }
+    } else {
+      // ganhar barra: regras por classe
+      if (player.advancedClass === "Berserker") {
+        // Ganha com dano sofrido e causado (aplicado nos eventos de dano); aqui regen base
+        player.classBar = Math.min(player.classBarMax, player.classBar + 4 * dt);
+      } else if (player.advancedClass === "Ladino") {
+        // Lento, mais precisa (ganha ao não ser atingido); regen base
+        player.classBar = Math.min(player.classBarMax, player.classBar + 3 * dt);
+      } else if (player.advancedClass === "RageTank") {
+        // Converte escudo ocioso em barra
+        player.classBar = Math.min(player.classBarMax, player.classBar + 2 * dt + (player.shield > 0 ? 1 * dt : 0));
+      } else if (player.advancedClass === "Paladino") {
+        // Fé passiva com o tempo
+        player.classBar = Math.min(player.classBarMax, player.classBar + 5 * dt);
+      }
+    }
+  }
+  // CD e delay global
+  player.skillGlobalDelay = Math.max(0, player.skillGlobalDelay - dt);
+  for (const k of [1, 2, 3, 4]) player.skillCd[k] = Math.max(0, (player.skillCd[k] || 0) - dt);
+}
+function handleSkillKey(k) {
+  if (!player.advancedClass) return;
+  if (k === 1) {
+    if (player.skillCd[1] > 0) return;
+    // toggle Mode se tiver barra
+    if (!player.skillModeActive && player.classBar <= 0) return;
+    player.skillModeActive = !player.skillModeActive;
+    player.skillCd[1] = SKILL_CD[1];
+    return;
+  }
+  if (player.skillGlobalDelay > 0) return;
+  if (player.skillCd[k] > 0) return;
+
+  const dmgBase = Math.max(1, player.dmg);
+  const shootTowardMouse = () => {
+    spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6);
+  };
+
+  if (player.advancedClass === "Berserker") {
+    if (k === 2) { // Tiro concentrado
+      shootTowardMouse();
+      player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) { // Sede berserker
+      if (player.classBar <= 0) return;
+      player.classBuffs.berserkLeech = 6.0; // duração
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) { // Fúria máxima
+      // rajada de tiros pesados
+      for (let i = 0; i < 6; i++) {
+        const angle = i * (Math.PI / 12) - Math.PI / 4;
+        const dirX = Math.cos(angle), dirY = Math.sin(angle);
+        spawnPlayerBullet(player.x, player.y, player.x + dirX, player.y + dirY, 22, dmgBase * 2.6, { dirX, dirY, life: 1.8 });
+      }
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "Ladino") {
+    if (k === 2) { // Tiro oculto (homing 100% hit)
+      // mira no inimigo mais próximo do mouse
+      let best = null, bestD = 1e9, bestIdx = -1;
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i]; if (!e.alive) continue;
+        const d = Math.hypot(e.x - mouseWX, e.y - mouseWY);
+        if (d < bestD) { bestD = d; best = e; bestIdx = i; }
+      }
+      if (best) {
+        spawnPlayerBullet(player.x, player.y, best.x, best.y, 17, dmgBase * 1.8, { homing: true, aimId: bestIdx, life: 2.2, turnRate: 9, type: "ladino" });
+        player.skillCd[2] = SKILL_CD[2];
+      }
+    } else if (k === 3) { // Percepção: 10% de dano crítico (buff)
+      player.classBuffs.ladinoCrit = 8.0; // 8s
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) { // Mutilação: 20 tiros teleguiados em 2s
+      const batch = 5, rounds = 4, gap = 0.5;
+      player.classBuffs.ladinoBurst = { remaining: rounds, timer: 0, gap, batch };
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "RageTank") {
+    if (k === 2) { // Tiro reforçado (escala com escudo)
+      const mult = 1 + Math.min(1.0, (player.shieldMax > 0 ? player.shield / player.shieldMax : 0)) * 1.0;
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6 * mult);
+      // consome um pouco de escudo
+      const cost = Math.round((player.shieldMax || 0) * 0.08);
+      player.shield = Math.max(0, player.shield - cost);
+      player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) { // Convicção: stacking 0.1% por hit no mesmo alvo
+      player.classBuffs.rageTankStacks = { timer: 10, stacks: 0, lastTargetId: null };
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) { // Fúria máxima: super tiro
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 24, dmgBase * 3.2, { life: 2.0 });
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "Paladino") {
+    if (k === 2) { // Tiro purificado
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.7);
+      player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) { // Fé: converte 5% do dano recebido em cura (buff)
+      player.classBuffs.palFaith = 10.0;
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) { // Redenção divina: alto dano em área + stun
+      // Aplicado no acerto (ver colisão), aqui só disparamos um tiro pesado
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 20, dmgBase * 2.8, { type: "pal_ult", life: 2.0 });
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  }
+
+  if (k >= 2 && k <= 4) player.skillGlobalDelay = SKILL_DELAY_S;
+}
+window.addEventListener("keydown", (e) => {
+  if (!player.alive) return;
+  const k = e.key;
+  if (k === '1') handleSkillKey(1);
+  else if (k === '2') handleSkillKey(2);
+  else if (k === '3') handleSkillKey(3);
+  else if (k === '4') handleSkillKey(4);
+});
+
 function centerCameraOnPlayer() {
   cam.x = clamp(player.x - viewW / 2, 0, Math.max(0, MAP_W - viewW));
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
@@ -153,7 +281,7 @@ function updateRebornBadge() {
   if (!rebornBadge) return;
   const n = player.rebornCount || 0;
   rebornBadge.textContent = `⭐ x${n} / 3`;
-  rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n*25}%`;
+  rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n * 25}%`;
 }
 
 function updateHUD() {
@@ -194,24 +322,24 @@ function toggleSkills(force) {
 }
 function renderSkills() {
   if (!skillsDiv) return;
-  if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
+  if (!player.skill) player.skill = { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0, body: 0 };
 
   // Bloqueio de Body Damage se for DPS após Reborn
   const isDPS = player.rebornClass === "DPS";
   const bodyDisabled = isDPS;
 
   const rows = [
-    ["dmg","Dano", false],
-    ["body","Body Damage", bodyDisabled],
-    ["def","Defesa", false],
-    ["hp","Vida", false],
-    ["regen","Regeneração", false],
-    ["speed","Velocidade", false],
-    ["mob","Mobilidade", false],
-  ].map(([k,label,locked])=>{
-    const v = player.skill[k]||0;
-    const lockNote = (k==="body" && locked) ? " <span style='font-size:11px;opacity:.8;'>(exclusivo de TANK após Reborn)</span>" : "";
-    return `<div class="skill-row"><span>${label}${lockNote}: <b>${v}</b></span><button class="up-skill" data-k="${k}" ${player.points<=0||locked?"disabled":""}>+1</button></div>`;
+    ["dmg", "Dano", false],
+    ["body", "Body Damage", bodyDisabled],
+    ["def", "Defesa", false],
+    ["hp", "Vida", false],
+    ["regen", "Regeneração", false],
+    ["speed", "Velocidade", false],
+    ["mob", "Mobilidade", false],
+  ].map(([k, label, locked]) => {
+    const v = player.skill[k] || 0;
+    const lockNote = (k === "body" && locked) ? " <span style='font-size:11px;opacity:.8;'>(exclusivo de TANK após Reborn)</span>" : "";
+    return `<div class="skill-row"><span>${label}${lockNote}: <b>${v}</b></span><button class="up-skill" data-k="${k}" ${player.points <= 0 || locked ? "disabled" : ""}>+1</button></div>`;
   }).join("");
 
   const ms = getPlayerMilestoneSummary();
@@ -223,8 +351,8 @@ function renderSkills() {
 
   const rebornLine = player.hasReborn
     ? `<div style="margin:8px 0 10px 0;padding:8px;border-radius:10px;border:1px solid #556;background:#1b2230;">
-         <b>Árvore Reborn</b>: ${player.rebornClass || "-"} ${player.rebornClass==="DPS"?"• Multiplicador de projétil x1.25 • Body Damage desativado (exclusivo de TANK)":
-         (player.rebornClass==="TANK"?"• DR +25% & Escudo (60% do HP) • Body Damage disponível":"")}
+         <b>Árvore Reborn</b>: ${player.rebornClass || "-"} ${player.rebornClass === "DPS" ? "• Multiplicador de projétil x1.25 • Body Damage desativado (exclusivo de TANK)" :
+      (player.rebornClass === "TANK" ? "• DR +25% & Escudo (60% do HP) • Body Damage disponível" : "")}
        </div>`
     : "";
 
@@ -245,7 +373,7 @@ function renderSkills() {
 }
 function upgradeSkill(key) {
   if (player.points <= 0) return;
-  if (!player.skill) player.skill = { dmg:0, def:0, hp:0, regen:0, speed:0, mob:0, body:0 };
+  if (!player.skill) player.skill = { dmg: 0, def: 0, hp: 0, regen: 0, speed: 0, mob: 0, body: 0 };
   // trava Body se for DPS
   if (key === "body" && player.rebornClass === "DPS") return;
   player.skill[key] = (player.skill[key] || 0) + 1;
@@ -257,7 +385,7 @@ function upgradeSkill(key) {
 /* ---------- Conquistas / XP / Level ---------- */
 let score = 0;
 let level10Shown = false;
-const achievements = { brave:false, bravePending:false, power8k:false };
+const achievements = { brave: false, bravePending: false, power8k: false };
 
 /* multiplicadores */
 let xpMult = 1.0;
@@ -270,51 +398,51 @@ function updateXpMult() {
 // Dano de projétil (considera DPS e conquista 35)
 let playerDamageMult = 1.0;
 
-function pushAchievementBanner(text, ms=3000){
+function pushAchievementBanner(text, ms = 3000) {
   activeBanners.push({ text, until: performance.now() + ms });
 }
 const activeBanners = [];
-function drawAchievementBanners(){
+function drawAchievementBanners() {
   const now = performance.now(); let y = 20;
-  for (let i=activeBanners.length-1; i>=0; i--){
+  for (let i = activeBanners.length - 1; i >= 0; i--) {
     const b = activeBanners[i];
-    if (now > b.until) { activeBanners.splice(i,1); continue; }
+    if (now > b.until) { activeBanners.splice(i, 1); continue; }
     ctx.save(); ctx.globalAlpha = 0.9;
-    ctx.fillStyle="#111a"; ctx.fillRect(viewW/2 - 180, y, 360, 34);
-    ctx.strokeStyle="#44f"; ctx.strokeRect(viewW/2 - 180, y, 360, 34);
-    ctx.fillStyle="#fff"; ctx.font="14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(b.text, viewW/2, y+17);
+    ctx.fillStyle = "#111a"; ctx.fillRect(viewW / 2 - 180, y, 360, 34);
+    ctx.strokeStyle = "#44f"; ctx.strokeRect(viewW / 2 - 180, y, 360, 34);
+    ctx.fillStyle = "#fff"; ctx.font = "14px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(b.text, viewW / 2, y + 17);
     ctx.restore(); y += 40;
   }
 }
-function drawAchievementIcons(){
+function drawAchievementIcons() {
   const icons = [];
-  if (achievements.brave) icons.push({emoji:"🏅",title:"+25% XP"});
-  if (achievements.power8k) icons.push({emoji:"⚡",title:"+10% DMG + Alcance"});
-  let x=10, y=10, size=28, pad=6;
-  for (const ic of icons){
-    ctx.save(); ctx.globalAlpha=0.95;
-    ctx.fillStyle="#1e1e1e"; ctx.fillRect(x,y,size,size);
-    ctx.strokeStyle="#66f"; ctx.strokeRect(x,y,size,size);
-    ctx.font="20px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(ic.emoji, x+size/2, y+size/2+1);
-    ctx.restore(); x += size+pad;
+  if (achievements.brave) icons.push({ emoji: "🏅", title: "+25% XP" });
+  if (achievements.power8k) icons.push({ emoji: "⚡", title: "+10% DMG + Alcance" });
+  let x = 10, y = 10, size = 28, pad = 6;
+  for (const ic of icons) {
+    ctx.save(); ctx.globalAlpha = 0.95;
+    ctx.fillStyle = "#1e1e1e"; ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = "#66f"; ctx.strokeRect(x, y, size, size);
+    ctx.font = "20px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(ic.emoji, x + size / 2, y + size / 2 + 1);
+    ctx.restore(); x += size + pad;
   }
 }
 function drawMilestoneBadges() {
   const ms = getPlayerMilestoneSummary();
   const list = [];
-  if (ms.dmg10) list.push({ text:"+20% vs blocos", color:"#ffd27e" });
-  if (ms.def10) list.push({ text:"+20% DR extra",  color:"#7ee57e" });
-  if (ms.spd10) list.push({ text:"10% esquiva",    color:"#7ec8ff" });
+  if (ms.dmg10) list.push({ text: "+20% vs blocos", color: "#ffd27e" });
+  if (ms.def10) list.push({ text: "+20% DR extra", color: "#7ee57e" });
+  if (ms.spd10) list.push({ text: "10% esquiva", color: "#7ec8ff" });
   if (!list.length) return;
   let x = 10, y = 48, w = 125, h = 20;
   for (const b of list) {
-    ctx.save(); ctx.globalAlpha=0.9;
-    ctx.fillStyle="#111a"; ctx.fillRect(x,y,w,h);
-    ctx.strokeStyle=b.color; ctx.strokeRect(x,y,w,h);
-    ctx.fillStyle="#fff"; ctx.font="12px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(b.text, x+w/2, y+h/2+1);
+    ctx.save(); ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#111a"; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = b.color; ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = "#fff"; ctx.font = "12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(b.text, x + w / 2, y + h / 2 + 1);
     ctx.restore(); x += w + 6;
   }
 }
@@ -331,12 +459,12 @@ function addXP(v) {
 
     if (!achievements.power8k && player.level >= 35) {
       achievements.power8k = true;
-      playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * 1.10;
+      playerDamageMult = (player.rebornClass === "DPS" ? 1.25 : 1.0) * 1.10;
       setProjectileRangeMult(1.35);
       flashEvent('Você obteve a conquista "Um Poder de Mais de 8 mil" (+10% dano, +35% alcance do projétil)');
       pushAchievementBanner("⚡ Um Poder de Mais de 8 mil", 3000);
     } else {
-      playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
+      playerDamageMult = (player.rebornClass === "DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
     }
 
     if (player.level === 10 && !level10Shown) { level10Shown = true; flashEvent("Novo objetivo: Renascer (alcance o Nível 25)"); }
@@ -345,23 +473,23 @@ function addXP(v) {
 }
 
 /* ---------- Respawns ---------- */
-const LIMITS = { basic:12, orange:6, boss:1, blocks:80 };
-const RESPAWN = { basic:40, orange:120, boss:600, block:2 };
-let accBasic=0, accOrange=0, accBoss=0, accBlock=0;
+const LIMITS = { basic: 12, orange: 6, boss: 1, blocks: 80 };
+const RESPAWN = { basic: 40, orange: 120, boss: 600, block: 2 };
+let accBasic = 0, accOrange = 0, accBoss = 0, accBlock = 0;
 
 function updateRespawns(dt) {
   accBlock += dt;
   if (accBlock >= RESPAWN.block) {
     accBlock -= RESPAWN.block;
-    if (blocks.filter(b=>b.alive).length < LIMITS.blocks) {
-      const types=["yellow","blue","purple"]; const type = types[(Math.random()*types.length)|0];
+    if (blocks.filter(b => b.alive).length < LIMITS.blocks) {
+      const types = ["yellow", "blue", "purple"]; const type = types[(Math.random() * types.length) | 0];
       spawnBlock(type, MAP_W, MAP_H, getSafeZones());
     }
   }
   accBasic += dt;
   if (accBasic >= RESPAWN.basic) {
     accBasic -= RESPAWN.basic;
-    if (enemies.filter(e=>e.alive && e.type==="basic").length < LIMITS.basic) {
+    if (enemies.filter(e => e.alive && e.type === "basic").length < LIMITS.basic) {
       spawnEnemy("basic", MAP_W, MAP_H, getSafeZones());
     }
   }
@@ -369,7 +497,7 @@ function updateRespawns(dt) {
     accOrange += dt;
     if (accOrange >= RESPAWN.orange) {
       accOrange -= RESPAWN.orange;
-      if (enemies.filter(e=>e.alive && e.type==="orange").length < LIMITS.orange) {
+      if (enemies.filter(e => e.alive && e.type === "orange").length < LIMITS.orange) {
         spawnEnemy("orange", MAP_W, MAP_H, getSafeZones());
       }
     }
@@ -378,7 +506,7 @@ function updateRespawns(dt) {
     accBoss += dt;
     if (accBoss >= RESPAWN.boss) {
       accBoss = 0;
-      if (!enemies.some(e=>e.alive && e.type==="boss")) {
+      if (!enemies.some(e => e.alive && e.type === "boss")) {
         spawnBoss(MAP_W, MAP_H, getSafeZones());
         flashEvent("⚠️ Boss apareceu!"); pushAchievementBanner("⚠️ Boss apareceu!", 2000);
       }
@@ -387,11 +515,12 @@ function updateRespawns(dt) {
 }
 
 
-function awardNearestEnemyPower(x,y, amount){
-  let best=null, bestD=Infinity;
-  for (const e of enemies){ if (!e.alive) continue;
+function awardNearestEnemyPower(x, y, amount) {
+  let best = null, bestD = Infinity;
+  for (const e of enemies) {
+    if (!e.alive) continue;
     const d = Math.hypot(e.x - x, e.y - y);
-    if (d < bestD){ bestD=d; best=e; }
+    if (d < bestD) { bestD = d; best = e; }
   }
   if (best) enemyGainPower(best, Math.max(1, Math.round(amount)));
 }
@@ -416,6 +545,13 @@ function dealDamageToPlayer(raw) {
 
   const dmgToHP = remaining * (1 - totalDR);
   player.hp -= dmgToHP;
+  // Classe: ganho de barra por dano recebido / cura por fé
+  if (player.advancedClass === "Berserker") { gainClassBar(Math.min(8, dmgToHP * 0.08)); }
+  if (player.classBuffs?.palFaith > 0) {
+    const heal = dmgToHP * 0.05;
+    player.hp = Math.min(player.maxHp, player.hp + heal);
+  }
+
 }
 
 /* ---------- Colisões / Combate ---------- */
@@ -435,7 +571,7 @@ function updateCollisions(dt) {
     const t = BLOCK_TYPES[b.type];
     const dx = b.x - player.x, dy = b.y - player.y;
     const dist = Math.hypot(dx, dy);
-    const overlap = (t.size/2 + (player.radius||28)) - dist;
+    const overlap = (t.size / 2 + (player.radius || 28)) - dist;
     if (overlap > 0) {
       currentSlowFactor = Math.max(currentSlowFactor, 1 - t.slow);
       dealDamageToPlayer(t.dmg * dt * 10);
@@ -460,11 +596,41 @@ function updateCollisions(dt) {
       if (!e.alive) continue;
       const hit = Math.hypot(pb.x - e.x, pb.y - e.y) < (e.radius + 6);
       if (hit) {
-        const dmg = pb.damage * (1 - (e.dmgReduce || 0));
-        e.hp -= dmg; pb.alive = false;
+        let dmg = pb.damage * (1 - (e.dmgReduce || 0));
+        // Buffs
+        if (player.classBuffs?.ladinoCrit > 0 && Math.random() < 0.10) { dmg *= 2.0; }
+        if (player.skillModeActive && player.advancedClass === "Berserker") { dmg *= 1.25; }
+        if (player.skillModeActive && player.advancedClass === "Ladino") { /* invis acelera */ }
+        if (player.skillModeActive && player.advancedClass === "RageTank") { dmg *= 1.15; }
+        if (player.skillModeActive && player.advancedClass === "Paladino") { dmg *= 1.10; }
+        // RageTank convicção stacks
+        if (player.classBuffs?.rageTankStacks) {
+          const st = player.classBuffs.rageTankStacks;
+          const same = (st.lastTargetId === enemies.indexOf(e));
+          if (same) st.stacks = Math.min(3000, st.stacks + 1); else st.stacks = 1;
+          st.lastTargetId = enemies.indexOf(e);
+          dmg *= (1 + st.stacks * 0.001); // 0.1% por hit
+        }
+        // Paladino ultimate: aplica stun em área
+        if (pb.type === "pal_ult") {
+          for (const kEnemy of enemies) {
+            if (!kEnemy.alive) continue;
+            const dd = Math.hypot(kEnemy.x - e.x, kEnemy.y - e.y);
+            if (dd < 160) { kEnemy.stunTimer = Math.max(kEnemy.stunTimer || 0, 2.0); }
+          }
+        }
+        e.hp -= dmg; pb.alive = false; if (player.advancedClass === 'Berserker') { gainClassBar(Math.min(6, dmg * 0.02)); }
+        // Berserker leech
+        if (player.classBuffs?.berserkLeech > 0) {
+          const heal = Math.max(0, player.maxHp * 0.0025);
+          player.hp = Math.min(player.maxHp, player.hp + heal);
+        }
         if (e.hp <= 0) {
           e.alive = false;
-          try { onBossDefeated(e); } catch (err) {}
+          try {
+            onBossDefeated(e);
+            // berserker: leech e rageTank stacks handled on hit below
+          } catch (err) { }
           const xp = e.xpReward || 10;
           addXP(getPlayerBonusXP(xp)); score += Math.floor(xp * 0.5);
           flashEvent(e.type === "boss" ? "🏆 Boss derrotado!" : "+XP");
@@ -477,7 +643,7 @@ function updateCollisions(dt) {
 
     for (const k of blocks) {
       if (!k.alive) continue;
-      const half = (BLOCK_TYPES[k.type]?.size || 40)/2;
+      const half = (BLOCK_TYPES[k.type]?.size || 40) / 2;
       if (Math.abs(pb.x - k.x) <= half + 6 && Math.abs(pb.y - k.y) <= half + 6) {
         const eff = Math.max(0, 1 - (k.dmgReduce || 0));
         const bonusVsBlocks = player.blockDmgMult || 1.0;
@@ -496,35 +662,35 @@ function updateCollisions(dt) {
   for (const e of enemies) {
     /* enemy vs enemy & blocks */
     // enemies collide with other enemies/blocks causing damage and gaining power on kills
-    for (const other of enemies){
-      if (!other.alive || other===e) continue;
+    for (const other of enemies) {
+      if (!other.alive || other === e) continue;
       const d = Math.hypot(e.x - other.x, e.y - other.y);
-      if (d < e.radius + other.radius){
+      if (d < e.radius + other.radius) {
         // damage each other slightly per tick
         const adv = enemyRankAdvantage(e.rank, other.rank);
         const advOther = enemyRankAdvantage(other.rank, e.rank);
-        const de = e.dmg * 0.5 * (1+adv) * dt;
-        const do_ = other.dmg * 0.5 * (1+advOther) * dt;
-        other.hp -= de * (1 - (other.dmgReduce||0));
-        if (other.hp <= 0){ other.alive=false; awardNearestEnemyPower(other.x, other.y, Math.max(3, Math.floor((other.xpReward||20)*0.5))); }
-        e.hp -= do_ * (1 - (e.dmgReduce||0));
+        const de = e.dmg * 0.5 * (1 + adv) * dt;
+        const do_ = other.dmg * 0.5 * (1 + advOther) * dt;
+        other.hp -= de * (1 - (other.dmgReduce || 0));
+        if (other.hp <= 0) { other.alive = false; awardNearestEnemyPower(other.x, other.y, Math.max(3, Math.floor((other.xpReward || 20) * 0.5))); }
+        e.hp -= do_ * (1 - (e.dmgReduce || 0));
       }
     }
     // enemy touching blocks
-    for (const b of blocks){
+    for (const b of blocks) {
       if (!b.alive) continue;
-      const half = (BLOCK_TYPES[b.type]?.size||40)/2;
-      const dx = b.x - e.x, dy = b.y - e.y; const dist = Math.hypot(dx,dy);
-      if (dist < half + e.radius){
+      const half = (BLOCK_TYPES[b.type]?.size || 40) / 2;
+      const dx = b.x - e.x, dy = b.y - e.y; const dist = Math.hypot(dx, dy);
+      if (dist < half + e.radius) {
         // Enemy scratches the block
         b.hp -= e.dmg * 0.4 * dt; b.recentHitTimer = 1.0;
-        if (b.hp <= 0){ b.alive=false; const xp = b.xpReward || (BLOCK_TYPES[b.type]?.xp||0); awardNearestEnemyPower(b.x,b.y, Math.max(1, Math.floor((xp||10)*0.5))); }
+        if (b.hp <= 0) { b.alive = false; const xp = b.xpReward || (BLOCK_TYPES[b.type]?.xp || 0); awardNearestEnemyPower(b.x, b.y, Math.max(1, Math.floor((xp || 10) * 0.5))); }
       }
     }
 
     if (!e.alive) continue;
     const dist = Math.hypot(player.x - e.x, player.y - e.y);
-    if (dist < (player.radius||28) + e.radius) {
+    if (dist < (player.radius || 28) + e.radius) {
       dealDamageToPlayer(e.dmg * dt);
       const dmgToEnemy = Math.max(1, player.bodyDmg) * playerDamageMult * (1 - (e.dmgReduce || 0)) * dt;
       e.hp -= dmgToEnemy;
@@ -564,7 +730,7 @@ function updateRespawn(dt) {
 
 /* ---------- Quests (UI lateral) ---------- */
 const questsDiv = document.getElementById("quests");
-const rebornQuest = { started:false, completed:false, requiredLevel:25 };
+const rebornQuest = { started: false, completed: false, requiredLevel: 25 };
 function renderQuests() {
   if (!questsDiv) return;
   const started = player.level >= 10 || rebornQuest.started || player.rebornCount > 0;
@@ -578,8 +744,8 @@ function renderQuests() {
       <div>
         <div><b>Reborn System</b></div>
         <div class="small">
-          ${player.rebornCount>=1 ? "Concluída (você já renasceu)" :
-            (active ? "Progrida até o Lv 25 para desbloquear" : "Quest System após Lv 10")}
+          ${player.rebornCount >= 1 ? "Concluída (você já renasceu)" :
+      (active ? "Progrida até o Lv 25 para desbloquear" : "Quest System após Lv 10")}
         </div>
       </div>
     </div>`;
@@ -607,10 +773,10 @@ function renderRebornPanel() {
   const tip = maxReached
     ? `<div class="small" style="margin-top:6px;">Limite de Reborns atingido (3/3). Você já tem +75% XP do Reborn.</div>`
     : (!eligible
-        ? `<div class="small" style="margin-top:6px;opacity:.85;">Continue evoluindo para liberar o Reborn.</div>`
-        : (player.rebornCount===0
-            ? `<div class="small" style="margin-top:6px;">Clique em prosseguir para escolher sua árvore (DPS ou TANK).</div>`
-            : `<div class="small" style="margin-top:6px;">Prossegua para ganhar +25% XP (apenas multiplicador nas próximas renascenças).</div>`));
+      ? `<div class="small" style="margin-top:6px;opacity:.85;">Continue evoluindo para liberar o Reborn.</div>`
+      : (player.rebornCount === 0
+        ? `<div class="small" style="margin-top:6px;">Clique em prosseguir para escolher sua árvore (DPS ou TANK).</div>`
+        : `<div class="small" style="margin-top:6px;">Prossegua para ganhar +25% XP (apenas multiplicador nas próximas renascenças).</div>`));
 
   // status ou escolha
   if (rebornPanelState === "status") {
@@ -660,7 +826,7 @@ function confirmReborn(cls) {
 
   // Atualiza multiplicadores depois do Reborn
   updateXpMult();
-  playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
+  playerDamageMult = (player.rebornClass === "DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0);
 
   // Mensagem diferente se foi 1º Reborn (com escolha) ou somente XP
   if (previousCount === 0) {
@@ -668,7 +834,7 @@ function confirmReborn(cls) {
     rebornQuest.completed = true;
     rebornPanelState = "status";
   } else {
-    flashEvent(`Reborn ${player.rebornCount}/3: +25% XP total agora +${player.rebornCount*25}%`);
+    flashEvent(`Reborn ${player.rebornCount}/3: +25% XP total agora +${player.rebornCount * 25}%`);
   }
 
   renderRebornPanel();
@@ -678,43 +844,46 @@ function confirmReborn(cls) {
 
 /* ---------- Render ---------- */
 function drawGrid() {
-  const g = 64; ctx.strokeStyle="#2a2a2a"; ctx.lineWidth=1;
-  let sx = -(cam.x % g); for (let x=sx; x<=viewW; x+=g){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,viewH); ctx.stroke(); }
-  let sy = -(cam.y % g); for (let y=sy; y<=viewH; y+=g){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(viewW,y); ctx.stroke(); }
+  const g = 64; ctx.strokeStyle = "#2a2a2a"; ctx.lineWidth = 1;
+  let sx = -(cam.x % g); for (let x = sx; x <= viewW; x += g) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, viewH); ctx.stroke(); }
+  let sy = -(cam.y % g); for (let y = sy; y <= viewH; y += g) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(viewW, y); ctx.stroke(); }
 }
 function drawPlayer() {
   const r = player.radius || 28;
   const sx = Math.floor(player.x - cam.x), sy = Math.floor(player.y - cam.y);
-  ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fillStyle = player.color || "#4ccfff"; ctx.fill();
+  ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fillStyle = player.color || "#4ccfff"; ctx.fill();
 
   // Barra de ESCUDO (se houver) acima da de HP
   if (player.shieldMax > 0) {
-    const w=84, h=6;
+    const w = 84, h = 6;
     const pctS = Math.max(0, Math.min(1, player.shield / player.shieldMax));
-    ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - r - 26, w, h);
-    ctx.fillStyle="#7ec8ff"; ctx.fillRect(sx - w/2, sy - r - 26, w * pctS, h);
-    ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 26, w, h);
+    ctx.fillStyle = "#000"; ctx.fillRect(sx - w / 2, sy - r - 26, w, h);
+    ctx.fillStyle = "#7ec8ff"; ctx.fillRect(sx - w / 2, sy - r - 26, w * pctS, h);
+    ctx.strokeStyle = "#111"; ctx.strokeRect(sx - w / 2, sy - r - 26, w, h);
   }
 
   // Badge de Rank do jogador (centralizado)
   try {
     const pr = (typeof getCurrentRank === 'function') ? getCurrentRank() : null;
     const label = pr ? `Rank ${pr}` : `Sem Rank`;
-    drawRankBadge(ctx, sx, sy - r - 46, label, {height:20});
-  } catch(e){}
+    drawRankBadge(ctx, sx, sy - r - 46, label, { height: 20 });
+  } catch (e) { }
 
   // Barra de HP
   if (player.maxHp) {
-    const w=84, h=8, pct=Math.max(0, Math.min(1, player.hp/player.maxHp));
-    ctx.fillStyle="#000"; ctx.fillRect(sx - w/2, sy - r - 18, w, h);
-    ctx.fillStyle="#2ecc71"; ctx.fillRect(sx - w/2, sy - r - 18, w * pct, h);
-    ctx.strokeStyle="#111"; ctx.strokeRect(sx - w/2, sy - r - 18, w, h);
+    const w = 84, h = 8, pct = Math.max(0, Math.min(1, player.hp / player.maxHp));
+    ctx.fillStyle = "#000"; ctx.fillRect(sx - w / 2, sy - r - 18, w, h);
+    ctx.fillStyle = "#2ecc71"; ctx.fillRect(sx - w / 2, sy - r - 18, w * pct, h);
+    ctx.strokeStyle = "#111"; ctx.strokeRect(sx - w / 2, sy - r - 18, w, h);
   }
 }
-function drawAchievementOverlays(){ drawAchievementIcons(); drawAchievementBanners(); drawMilestoneBadges(); }
+function drawAchievementOverlays() {
+  drawAchievementIcons(); drawAchievementBanners(); drawMilestoneBadges();
+  drawSkillHud();
+}
 
 function draw() {
-  ctx.fillStyle = "#202020"; ctx.fillRect(0,0,viewW,viewH);
+  ctx.fillStyle = "#202020"; ctx.fillRect(0, 0, viewW, viewH);
   drawGrid(); drawSafeZones(); drawBlocks(ctx, cam); drawEnemies(ctx, cam); drawPlayerBullets(ctx, cam); drawPlayer(); drawAchievementOverlays();
 
   if (rebornBtn) {
@@ -729,7 +898,7 @@ function draw() {
 let lastTime = performance.now();
 function update() {
   const now = performance.now();
-  const dt = Math.min(0.033, (now - lastTime)/1000);
+  const dt = Math.min(0.033, (now - lastTime) / 1000);
   lastTime = now;
 
   if (!rebornQuest.started && player.level >= 10) {
@@ -737,78 +906,128 @@ function update() {
   }
 
   if (player.alive) handleInput(dt);
-  shootCD -= dt; if (isShooting) tryShoot();
+  classTick(dt);
+  // tick buffs
+  if (player.classBuffs) {
+    for (const k in player.classBuffs) { if (typeof player.classBuffs[k] === 'number') { player.classBuffs[k] = Math.max(0, player.classBuffs[k] - dt); } else if (player.classBuffs[k]?.timer) { player.classBuffs[k].timer -= dt; if (player.classBuffs[k].timer <= 0) { if (player.classBuffs[k].remaining > 0) { player.classBuffs[k].timer = player.classBuffs[k].gap; player.classBuffs[k].remaining--; /* spawn burst */ let bestIdx = -1, bestD = 1e9; for (let i = 0; i < enemies.length; i++) { const e = enemies[i]; if (!e.alive) continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < bestD) { bestD = d; bestIdx = i; } } if (bestIdx >= 0) { for (let j = 0; j < player.classBuffs[k].batch; j++) { spawnPlayerBullet(player.x, player.y, player.x + 1, player.y, 18, Math.max(1, player.dmg) * 1.1, { homing: true, aimId: bestIdx, life: 1.6, turnRate: 10, type: "ladino_burst" }); } } } else { delete player.classBuffs[k]; } } } }
+    shootCD -= dt; if (isShooting) tryShoot();
 
-  updateCollisions(dt);
-  updateEnemies(dt, getSafeZones());
-  updatePlayerBullets(dt);
-  updateRespawn(dt);
-  updateBlocksHitTimers(dt);
-  updateRespawns(dt);
+    updateCollisions(dt);
+    updateEnemies(dt, getSafeZones());
+    updatePlayerBullets(dt);
+    updateRespawn(dt);
+    updateBlocksHitTimers(dt);
+    updateRespawns(dt);
 
-  // Rank: atualizar poder e bônus
-  tickRankSystem();
-  // Aplicar multiplicadores no dano do jogador (projétil/body)
-  playerDamageMult = (player.rebornClass==="DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0) * (player.rankDamageMult||1.0);
+    // Rank: atualizar poder e bônus
+    tickRankSystem();
+    // Aplicar multiplicadores no dano do jogador (projétil/body)
+    playerDamageMult = (player.rebornClass === "DPS" ? 1.25 : 1.0) * (achievements.power8k ? 1.10 : 1.0) * (player.rankDamageMult || 1.0);
 
-  centerCameraOnPlayer(); updateHUD(); renderQuests();
-}
-function gameLoop(){ update(); draw(); requestAnimationFrame(gameLoop); }
+    centerCameraOnPlayer(); updateHUD(); renderQuests();
+  }
+  function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
 
-/* ---------- Resize ---------- */
-recomputeSafeZones();
-window.addEventListener("resize", () => {
-  viewW = window.innerWidth; viewH = window.innerHeight;
-  canvas.width = viewW; canvas.height = viewH;
-  MAP_W = viewW * 3; MAP_H = viewH * 3;
-  centerCameraOnPlayer();
+  /* ---------- Resize ---------- */
+  recomputeSafeZones();
+  window.addEventListener("resize", () => {
+    viewW = window.innerWidth; viewH = window.innerHeight;
+    canvas.width = viewW; canvas.height = viewH;
+    MAP_W = viewW * 3; MAP_H = viewH * 3;
+    centerCameraOnPlayer();
 
-  recomputeSafeZones();});
+    recomputeSafeZones();
+  });
 
-/* ---------- Start ---------- */
-initGame();
-updateXpMult(); // inicializa multiplicador de XP
-gameLoop();
+  /* ---------- Start ---------- */
+  initGame();
+  updateXpMult(); // inicializa multiplicador de XP
+  gameLoop();
 
-/* ---------- Rank UI ---------- */
-rankBtn?.addEventListener("click", () => toggleRank());
-function toggleRank(force){
-  if (!rankPanel) return;
-  const show = (typeof force === "boolean") ? force : (rankPanel.style.display !== "block");
-  rankPanel.style.display = show ? "block" : "none";
-  if (show) renderRankPanel();
-}
-function renderRankPanel(){
-  if (!rankPanel) return;
-  const unlocked = rankUnlocked();
-  const cur = getCurrentRank() || "Sem Rank";
-  const next = getNextRank();
-  const pb = getPowerBreakdown();
-  const need = next ? getRequiredPowerFor(next) : 0;
-  const pct = next ? Math.max(0, Math.min(1, pb.total / need)) : 1;
-  const can = next ? (pb.total >= need) : false;
+  /* ---------- Rank UI ---------- */
+  rankBtn?.addEventListener("click", () => toggleRank());
+  function toggleRank(force) {
+    if (!rankPanel) return;
+    const show = (typeof force === "boolean") ? force : (rankPanel.style.display !== "block");
+    rankPanel.style.display = show ? "block" : "none";
+    if (show) renderRankPanel();
+  }
+  function renderRankPanel() {
+    if (!rankPanel) return;
+    const unlocked = rankUnlocked();
+    const cur = getCurrentRank() || "Sem Rank";
+    const next = getNextRank();
+    const pb = getPowerBreakdown();
+    const need = next ? getRequiredPowerFor(next) : 0;
+    const pct = next ? Math.max(0, Math.min(1, pb.total / need)) : 1;
+    const can = next ? (pb.total >= need) : false;
 
-  rankPanel.innerHTML = `
+    rankPanel.innerHTML = `
     <div class="title">Rank System</div>
     <div class="row"><b>Status:</b> ${unlocked ? "Desbloqueado" : "Bloqueado (Reborn 1 necessário)"}</div>
     <div class="row"><b>Rank Atual:</b> ${cur}${next ? ` &nbsp;•&nbsp; <span class="small">Próximo: ${next} (requer ${need} Poder)</span>` : ""}</div>
     <div class="row"><b>Poder de Combate:</b> ${pb.total}
       <div class="small">Skills: ${pb.skills} • Bosses: ${pb.bosses} • Conquistas: ${pb.achieves}</div>
-      ${next ? `<div class="pbar"><div style="width:${Math.floor(pct*100)}%"></div></div>` : ""}
+      ${next ? `<div class="pbar"><div style="width:${Math.floor(pct * 100)}%"></div></div>` : ""}
     </div>
     <div class="row">
       <button id="rankProgressBtn" ${unlocked && can ? "" : "disabled"}>${next ? `Progredir &raquo; Rank ${next}` : "Máximo atingido"}</button>
       <button id="rankCloseBtn" style="margin-left:8px;">Fechar</button>
     </div>`;
-  document.getElementById("rankCloseBtn")?.addEventListener("click", () => toggleRank(false));
-  const btn = document.getElementById("rankProgressBtn");
-  if (btn && unlocked && can && next){
-    btn.addEventListener("click", () => {
-      const boss = startTrial(MAP_W, MAP_H, getSafeZones());
-      if (boss){
-        flashEvent(`Prova de Rank iniciada! Derrote o Boss para obter Rank ${next}.`);
-        toggleRank(false);
-      }
+    document.getElementById("rankCloseBtn")?.addEventListener("click", () => toggleRank(false));
+    const btn = document.getElementById("rankProgressBtn");
+    if (btn && unlocked && can && next) {
+      btn.addEventListener("click", () => {
+        const boss = startTrial(MAP_W, MAP_H, getSafeZones());
+        if (boss) {
+          flashEvent(`Prova de Rank iniciada! Derrote o Boss para obter Rank ${next}.`);
+          toggleRank(false);
+        }
+      });
+    }
+  }
+
+  /* ---------- Class Panel control ---------- */
+  function maybeShowClassPanel() {
+    const panel = document.getElementById('classPanel');
+    if (!panel) return;
+    const can = (player.rebornCount >= 2) && !!player.rebornClass && !player.advancedClass;
+    panel.style.display = can ? 'block' : 'none';
+    if (can) {
+      // enable only those matching tree
+      const isDPS = player.rebornClass === "DPS";
+      document.getElementById('pickBerserker').style.display = isDPS ? 'block' : 'none';
+      document.getElementById('pickLadino').style.display = isDPS ? 'block' : 'none';
+      document.getElementById('pickRageTank').style.display = !isDPS ? 'block' : 'none';
+      document.getElementById('pickPaladino').style.display = !isDPS ? 'block' : 'none';
+    }
+  }
+  ['pickBerserker', 'pickLadino', 'pickRageTank', 'pickPaladino'].forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    el.addEventListener('click', () => {
+      const name = id === 'pickBerserker' ? 'Berserker' : id === 'pickLadino' ? 'Ladino' : id === 'pickRageTank' ? 'RageTank' : 'Paladino';
+      setAdvancedClass(name);
+      flashEvent('Classe ' + name + ' desbloqueada!');
+      maybeShowClassPanel();
     });
+  });
+
+  function drawSkillHud() {
+    const baseX = 20, baseY = viewH - 70, w = 44, h = 44, gap = 8;
+    ctx.save();
+    for (let i = 1; i <= 4; i++) {
+      const x = baseX + (i - 1) * (w + gap), y = baseY;
+      ctx.fillStyle = "#222a"; ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = "#8cf"; ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = "#fff"; ctx.font = "12px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(i), x + w / 2, y + h / 2);
+      const cd = player.skillCd?.[i] || 0;
+      if (cd > 0) {
+        const pct = Math.min(1, cd / SKILL_CD[i]);
+        ctx.fillStyle = "#000a"; ctx.fillRect(x, y, w, h * pct);
+        ctx.fillStyle = "#ffd"; ctx.fillText(Math.ceil(cd), x + w / 2, y + h - 8);
+      }
+    }
+    ctx.restore();
   }
 }

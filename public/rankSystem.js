@@ -187,3 +187,5 @@ export function tickRankSystem(){
 }
 
 export { RANK_REQUIREMENTS };
+
+export function setRankUnlocked(v){ state.unlocked = !!v; }

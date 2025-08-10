@@ -96,7 +96,18 @@
   </style>
 </head>
 <body>
-  <canvas id="game"></canvas>
+<div id="eventMsg"></div>
+
+  
+  <div id="classHud" style="position:absolute; left:20px; top:64px; z-index:11; color:#fff; font-family:Arial;">
+    <div id="classInfo" style="margin-bottom:6px;">Classe: <span id="className">-</span></div>
+    <div id="classBarCt" style="width:220px;height:14px;background:#333;border:1px solid #88e; border-radius:8px; overflow:hidden;">
+      <div id="classBar" style="height:100%;width:0%;background:linear-gradient(90deg,#8ff,#7f7);"></div>
+    </div>
+    <div style="margin-top:6px;font-size:13px;opacity:.85;">Skills [1]=Modo [2]=Tiro [3]=Buff [4]=Ultimate</div>
+  </div>
+
+<canvas id="game"></canvas>
 
   <div id="hud">
     <span>HP: <b id="hp">0/0</b></span>
@@ -120,5 +131,18 @@
 
   <script type="module" src="rankSystem.js"></script>
   <script type="module" src="game.js"></script>
+
+  <div id="classPanel" style="position:absolute; right:20px; top:350px; background:rgba(20,20,28,.97); border:2px solid #5a6c8f; border-radius:16px; padding:16px; display:none; min-width:360px; color:#fff; z-index:16;">
+    <h3>Upgrade de Classe</h3>
+    <div id="classDesc" style="font-size:13px; opacity:.9; margin:6px 0 10px 0;">Escolha uma subclasse da sua árvore atual.</div>
+    <div class="choice-grid">
+      <div class="choice" id="pickBerserker"><b>Berserker</b><div class="small">Barra de Fúria; cura 0.25%/tiro na Sede</div></div>
+      <div class="choice" id="pickLadino"><b>Ladino</b><div class="small">Furtividade, tiros teleguiados</div></div>
+      <div class="choice" id="pickRageTank"><b>RageTank</b><div class="small">Amplifica tiros com Escudo</div></div>
+      <div class="choice" id="pickPaladino"><b>Paladino</b><div class="small">Barra de Fé; stun amplo</div></div>
+    </div>
+    <div style="margin-top:8px;font-size:12px;opacity:.8;">Disponível após Reborn 2.</div>
+  </div>
+
 </body>
 </html>

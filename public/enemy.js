@@ -9,6 +9,8 @@ import { blocks, BLOCK_TYPES } from "./blocks.js";
 import { randInt } from "./utils.js";
 
 export const enemies = [];
+// Exposição limitada para projéteis teleguiados
+if (typeof window !== 'undefined') { window.__getEnemyRef = (idx)=> enemies[idx] || null; }
 export const shooterBullets = [];
 export const bossProjectiles = [];
 
@@ -285,6 +287,9 @@ function dealDamageToPlayer(raw) {
 export function updateEnemies(dt, safeZones) {
   for (const e of enemies) {
     if (!e.alive) continue;
+    e.stunTimer = Math.max(0, (e.stunTimer||0) - dt);
+    const isStunned = e.stunTimer > 0;
+
 
     // Fases do Boss
     if (e.type==="boss") {
