@@ -1,7 +1,7 @@
 /* ========================================================================
  * rankSystem.js
  * Sistema de Rank inspirado em Solo Leveling.
- * - Desbloqueia após Reborn 2
+ * - Desbloqueia após Reborn 1
  * - "Poder de Combate" (Power) vem de:
  *     * Pontos em skills: Dano=+2, Body=+3, Defesa=+3, Vida=+1 (por ponto)
  *     * Bônus de chefes de prova de rank (escala por rank)
@@ -19,9 +19,9 @@ import { clamp } from "./utils.js";
 /* ---------- Tiers e Requisitos ---------- */
 export const RANK_ORDER = ["E","E+","D","D+","C","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"];
 const RANK_REQUIREMENTS = {
-  "E":10, "E+":20, "D":35, "D+":50, "C+":70, "B":95, "B+":120,
-  "A":150, "A+":185, "S":230, "S+":280, "SS":340, "SS+":410,
-  "SSS":490, "SSS+":580, "U":700
+  "E":40, "E+":100, "D":180, "D+":300,"C+":450, "C+":600, "B":850, "B+":1000,
+  "A":1500, "A+":2000, "S":3000, "S+":4500, "SS":6500, "SS+":10000,
+  "SSS":15000, "SSS+":25000, "U":50000
 };
 /* ---------- Boss de progressão: níveis fixos por Rank ---------- */
 export const PROGRESSION_BOSS_FIXED_LEVEL = {
@@ -46,9 +46,9 @@ export const PROGRESSION_BOSS_FIXED_LEVEL = {
 
 /* Power ganho por Boss de prova (pode ajustar conforme balance) */
 const RANK_BOSS_REWARD = {
-  "E":40, "E+":100, "D":180, "D+":300,"C":450, "C+":600, "B":850, "B+":1000,
-  "A":1500, "A+":2000, "S":3000, "S+":4500, "SS":6500, "SS+":10000,
-  "SSS":15000, "SSS+":25000, "U":50000
+  "E":5, "E+":5, "D":5, "D+":5,"C":5, "C+":10, "B":15, "B+":20,
+  "A":50, "A+":75, "S":100, "S+":120, "SS":150, "SS+":200,
+  "SSS":250, "SSS+":500, "U":1000
 };
 
 /* ---------- Estado ---------- */
@@ -139,7 +139,7 @@ export function onBossDefeated(boss){
 
 /* ---------- Desbloqueio ---------- */
 export function checkUnlockByReborn(){
-  state.unlocked = (player.rebornCount||0) >= 2;
+  state.unlocked = (player.rebornCount||0) >= 1;
 }
 
 /* ---------- Bônus por Rank ---------- */
