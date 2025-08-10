@@ -12,6 +12,15 @@ export const enemies = [];
 export const shooterBullets = [];
 export const bossProjectiles = [];
 
+/* ---------- Pânico ao ser atingido por Boss ---------- */
+export function panicFromBossHit(e, boss){
+  if (!e || !e.alive) return;
+  if (e.type === 'boss') return;
+  e._panicFrom = boss || null;
+  e._panicTimer = Math.max(e._panicTimer||0, 2.5); // foge por ~2.5s
+}
+
+
 /* ---------- Rank visual (rótulo) ---------- */
 function drawRankBadge(ctx, x, y, text, opts){
   if (!text) return;
@@ -73,6 +82,72 @@ export function enemyRankAdvantage(selfRank, targetRank){
   return Math.min(0.60, 0.25 + Math.max(0, gap-1)*0.05);
 }
 
+
+/* ---------- Inteligência de IA (iLv1..iLv6) ---------- */
+const ILV_CONFIG = {
+  1: { precise: 0.10, fleePct: 0.70 },
+  2: { precise: 0.25, fleePct: 0.60 },
+  3: { precise: 0.35, fleePct: 0.50 },
+  4: { precise: 0.50, fleePct: 0.30 },
+  5: { precise: 0.70, fleePct: 0.00 },
+  6: { precise: 0.80, fleePct: 0.00 }
+};
+function rollILvForRank(rank){
+  // rank === null/undefined => "Sem Rank": chance iLv1..iLv3
+  if (!rank){
+    const pool = [1,1,2,2,3]; // mais chance de 1/2
+    return pool[(Math.random()*pool.length)|0];
+  }
+  const idx = ENEMY_RANKS.indexOf(rank);
+  if (idx < 0) {
+    const pool = [1,2,3];
+    return pool[(Math.random()*pool.length)|0];
+  }
+  const idxCplus = ENEMY_RANKS.indexOf("C+");
+  if (idx <= ENEMY_RANKS.indexOf("C+")) {
+    // E .. C+  => iLv2..iLv4
+    const pool = [2,2,3,3,4];
+    return pool[(Math.random()*pool.length)|0];
+  }
+  // C+ .. U  => acima do iLv3 (4..6), tendendo a 4/5
+  const pool = [4,4,4,5,5,6];
+  return pool[(Math.random()*pool.length)|0];
+}
+function enforceILvForRank(e){
+  // Boss e Boss de progressão sempre iLv6
+  if (e.type === "boss") { e.iLv = 6; return; }
+  const minByRank = (rank)=>{
+    if (!rank) return 1;
+    const idx = ENEMY_RANKS.indexOf(rank);
+    if (idx < 0) return 1;
+    if (idx <= ENEMY_RANKS.indexOf("C+")) return 2; // E..C+
+    return 4; // C+..U
+  };
+  const min = minByRank(e.rank);
+  if (!e.iLv || e.iLv < min) e.iLv = min;
+  if (e.iLv > 6) e.iLv = 6;
+}
+function maybeUpgradeILvOnPower(e){
+  // Quanto mais forte (rank sobe), mais inteligente
+  enforceILvForRank(e);
+}
+function aimWithIntelligence(e, target){
+  const cfg = ILV_CONFIG[e.iLv||1] || ILV_CONFIG[1];
+  const precise = Math.random() < cfg.precise;
+  let tx = target.x, ty = target.y;
+  if (!precise){
+    // adiciona dispersão angular de até ~22 graus e ruído de distância
+    const dx = target.x - e.x, dy = target.y - e.y;
+    const d  = Math.hypot(dx,dy) || 1;
+    const ang = Math.atan2(dy,dx);
+    const off = (Math.random()*0.4 - 0.2); // -0.2..+0.2 rad (~±11.5°)
+    const mult = 1 + (Math.random()*0.35); // 1..1.35
+    tx = e.x + Math.cos(ang+off) * d * mult;
+    ty = e.y + Math.sin(ang+off) * d * mult;
+  }
+  return { tx, ty };
+}
+
 function applyEnemyRankBenefits(e){
   const b = ENEMY_BENEFITS[e.rank] || null;
   if (!b) return;
@@ -89,7 +164,8 @@ function applyEnemyRankBenefits(e){
 export function enemyGainPower(e, amount){
   e.power += Math.max(0, amount|0);
   const nr = nextRankForPower(e.power);
-  if (nr && nr !== e.rank){ e.rank = nr; e.rankLabel = nr; applyEnemyRankBenefits(e); }
+  if (nr && nr !== e.rank){ e.rank = nr; e.rankLabel = nr; applyEnemyRankBenefits(e);
+  enforceILvForRank(e); }
 }
 
 /* ---------- Bases ---------- */
@@ -157,6 +233,13 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null, opts={}) {
     rankSecondBar: 0,
     wander: {tx: pos.x, ty: pos.y, t: 0}
   };
+  // Inteligência inicial
+  if (type === "boss") { e.iLv = 6; }
+  else {
+    const rolled = rollILvForRank(e.rank);
+    e.iLv = rolled;
+  }
+
   if (opts && typeof opts.forcedPower === 'number') e.power = opts.forcedPower;
   if (opts && opts.rankLabel) { e.rank = opts.rankLabel; e.rankLabel = opts.rankLabel; }
 
@@ -170,6 +253,7 @@ export function spawnEnemy(type, mapW, mapH, safeZones, level=null, opts={}) {
   if (!e.rank) e.rank = rr;
   if (!e.rankLabel) e.rankLabel = e.rank;
   applyEnemyRankBenefits(e);
+  enforceILvForRank(e);
   enemies.push(e);
   return e;
 }
@@ -227,6 +311,7 @@ export function updateEnemies(dt, safeZones) {
       let bestD = Infinity, best=null;
       for (const other of enemies){
         if (!other.alive || other===e) continue;
+        if ((e.type==='basic' || e.type==='orange') && other.type==='boss') continue;
         const d2 = Math.hypot(other.x - e.x, other.y - e.y);
         if (d2 < bestD){ bestD = d2; best = other; }
       }
@@ -285,7 +370,8 @@ export function updateEnemies(dt, safeZones) {
       e.shootCd = (e.shootCd || 0) - dt;
       if (inRange && e.shootCd <= 0) {
         e.shootCd = prof.cd;
-        const tx = target.x, ty = target.y;
+        const _aim = aimWithIntelligence(e, target);
+        const tx = _aim.tx, ty = _aim.ty;
         const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx,dy) || 1;
         const spMult = (e._projSpeedMult || 1);
         const spd = (prof.speed * spMult);

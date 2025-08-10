@@ -29,7 +29,7 @@ import {
   getPlayerDefPercent, getShieldDefPercent, getPlayerBonusXP, xpToNext, getPlayerMilestoneSummary,
   doReborn
 } from "./player.js";
-import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies, enemyGainPower, enemyRankAdvantage } from "./enemy.js";
+import { enemies, spawnEnemy, spawnBoss, updateEnemies, drawEnemies, enemyGainPower, enemyRankAdvantage, panicFromBossHit } from "./enemy.js";
 import { blocks, BLOCK_TYPES, spawnBlock, drawBlocks, updateBlocksHitTimers } from "./blocks.js";
 import { playerBullets, spawnPlayerBullet, updatePlayerBullets, drawPlayerBullets, setProjectileRangeMult } from "./projectiles.js";
 import { clamp } from "./utils.js";
