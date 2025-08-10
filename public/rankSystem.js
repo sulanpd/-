@@ -23,27 +23,6 @@ const RANK_REQUIREMENTS = {
   "A":150, "A+":185, "S":230, "S+":280, "SS":340, "SS+":410,
   "SSS":490, "SSS+":580, "U":700
 };
-/* ---------- Boss de progressão: níveis fixos por Rank ---------- */
-export const PROGRESSION_BOSS_FIXED_LEVEL = {
-  "E": 5,
-  "E+": 15,
-  "D": 25,
-  "D+": 30,
-  "C": 40,
-  "C+": 75,
-  "B": 100,
-  "B+": 160,
-  "A": 210,
-  "A+": 280,
-  "S": 360,
-  "S+": 500,
-  "SS": 700,
-  "SS+": 1000,
-  "SSS": 1500,
-  "SSS+": 3000,
-  "U": 5000
-};
-
 /* Power ganho por Boss de prova (pode ajustar conforme balance) */
 const RANK_BOSS_REWARD = {
   "E":10, "E+":12, "D":15, "D+":18, "C+":20, "B":25, "B+":30,
@@ -118,9 +97,8 @@ export function canProgress(){
 export function startTrial(mapW, mapH, safeZones){
   const next = getNextRank();
   if (!next) return null;
-  // Nasce Boss de progressão com NÍVEL FIXO por Rank (fallback: nível do jogador)
-  const fixedLvl = PROGRESSION_BOSS_FIXED_LEVEL[next] ?? player.level;
-  const boss = spawnBoss(mapW, mapH, safeZones, fixedLvl);
+  // Nasce Boss Tank com nível atual do jogador
+  const boss = spawnBoss(mapW, mapH, safeZones, player.level);
   boss._rankTrial = true;
   boss._trialTargetRank = next;
   boss._rankLabel = next;
