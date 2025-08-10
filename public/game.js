@@ -52,12 +52,16 @@ const BASES = { BASE_HP: 100, BASE_DMG: 25, BASE_DEF: 0, BASE_SPEED: 3.2, BASE_M
 playerBaseStats(BASES);
 
 /* ---------- Safe Zones ---------- */
-export function getSafeZones() {
-  return [
+export let SAFE_ZONES = [];
+function recomputeSafeZones() {
+  SAFE_ZONES = [
     { x: MAP_W * 0.25, y: MAP_H * 0.25, r: 160 },
     { x: MAP_W * 0.75, y: MAP_H * 0.25, r: 160 },
     { x: MAP_W * 0.50, y: MAP_H * 0.75, r: 160 }
   ];
+}
+function getSafeZones() {
+  return SAFE_ZONES;
 }
 function drawSafeZones() {
   ctx.save();
@@ -167,7 +171,7 @@ function updateHUD() {
     const can = unlocked && next && pb.total >= getRequiredPowerFor(next);
     rankBtn.disabled = !unlocked;
     rankBtn.className = (unlocked && can) ? 'glow' : '';
-    rankBtn.title = unlocked ? (can && next ? `Pronto para Rank ${next}` : 'Progrida o Poder para avançar') : 'Desbloqueia no Reborn 2';
+    rankBtn.title = unlocked ? (can && next ? `Pronto para Rank ${next}` : 'Progrida o Poder para avançar') : 'Desbloqueia no Reborn 1';
   }
 }
 function flashEvent(msg) {
@@ -752,12 +756,14 @@ function update() {
 function gameLoop(){ update(); draw(); requestAnimationFrame(gameLoop); }
 
 /* ---------- Resize ---------- */
+recomputeSafeZones();
 window.addEventListener("resize", () => {
   viewW = window.innerWidth; viewH = window.innerHeight;
   canvas.width = viewW; canvas.height = viewH;
   MAP_W = viewW * 3; MAP_H = viewH * 3;
   centerCameraOnPlayer();
-});
+
+  recomputeSafeZones();});
 
 /* ---------- Start ---------- */
 initGame();
@@ -784,7 +790,7 @@ function renderRankPanel(){
 
   rankPanel.innerHTML = `
     <div class="title">Rank System</div>
-    <div class="row"><b>Status:</b> ${unlocked ? "Desbloqueado" : "Bloqueado (Reborn 2 necessário)"}</div>
+    <div class="row"><b>Status:</b> ${unlocked ? "Desbloqueado" : "Bloqueado (Reborn 1 necessário)"}</div>
     <div class="row"><b>Rank Atual:</b> ${cur}${next ? ` &nbsp;•&nbsp; <span class="small">Próximo: ${next} (requer ${need} Poder)</span>` : ""}</div>
     <div class="row"><b>Poder de Combate:</b> ${pb.total}
       <div class="small">Skills: ${pb.skills} • Bosses: ${pb.bosses} • Conquistas: ${pb.achieves}</div>

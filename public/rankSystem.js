@@ -19,9 +19,23 @@ import { clamp } from "./utils.js";
 /* ---------- Tiers e Requisitos ---------- */
 export const RANK_ORDER = ["E","E+","D","D+","C","C+","B","B+","A","A+","S","S+","SS","SS+","SSS","SSS+","U"];
 const RANK_REQUIREMENTS = {
-  "E":40, "E+":100, "D":180, "D+":300,"C+":450, "C+":600, "B":850, "B+":1000,
-  "A":1500, "A+":2000, "S":3000, "S+":4500, "SS":6500, "SS+":10000,
-  "SSS":15000, "SSS+":25000, "U":50000
+  "E": 40,
+"E+": 100,
+"D": 180,
+"D+": 300,
+"C": 450,
+"C+": 600,
+"B": 850,
+"B+": 1000,
+"A": 1500,
+"A+": 2000,
+"S": 3000,
+"S+": 4500,
+"SS": 6500,
+"SS+": 10000,
+"SSS": 15000,
+"SSS+": 25000,
+"U": 50000
 };
 /* ---------- Boss de progressão: níveis fixos por Rank ---------- */
 export const PROGRESSION_BOSS_FIXED_LEVEL = {
