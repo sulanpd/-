@@ -106,7 +106,7 @@ if (!window.__keysListenerBound){
     else if (k==='4') handleSkillKey(4);
   });
 }
-eMouseWorld);
+eMouseWorld;
 
 function tryShoot(){
   if (!player.alive) return;
