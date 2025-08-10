@@ -852,7 +852,7 @@ function renderRebornPanel() {
 }
 function confirmReborn(cls) {
   const previousCount = player.rebornCount || 0;
-  doReborn, setAdvancedClass, gainClassBar, consumeClassBar(cls, BASES, getSafeZones());
+  doReborn(cls, BASES, getSafeZones());
 
   // Atualiza multiplicadores depois do Reborn
   updateXpMult();
