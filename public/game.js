@@ -1039,3 +1039,33 @@ function maybeShowClassPanel(){
     maybeShowClassPanel();
   });
 });
+
+
+// --- FIX: global classTick so update() can call it ---
+function classTick(dt){
+  // Atualiza barra das classes avançadas e cooldowns
+  if (player.advancedClass){
+    if (player.skillModeActive){
+      // Consome barra durante o modo ativo
+      player.classBar = Math.max(0, (player.classBar||0) - 1.5*dt);
+      if (player.classBar <= 0){ player.skillModeActive = false; }
+    } else {
+      const max = player.classBarMax || 0;
+      const cur = player.classBar || 0;
+      if (player.advancedClass === "Berserker") {
+        player.classBar = Math.min(max, cur + 4*dt);
+      } else if (player.advancedClass === "Ladino") {
+        player.classBar = Math.min(max, cur + 3*dt);
+      } else if (player.advancedClass === "RageTank") {
+        // ganha um pouco mais se estiver com escudo
+        player.classBar = Math.min(max, cur + 2*dt + (player.shield>0?1*dt:0));
+      } else if (player.advancedClass === "Paladino") {
+        player.classBar = Math.min(max, cur + 5*dt);
+      }
+    }
+  }
+  // resfriamento global e individuais
+  player.skillGlobalDelay = Math.max(0, (player.skillGlobalDelay||0) - dt);
+  if (!player.skillCd) player.skillCd = {1:0,2:0,3:0,4:0};
+  for (const k of [1,2,3,4]) player.skillCd[k] = Math.max(0, (player.skillCd[k]||0) - dt);
+}
