@@ -80,7 +80,11 @@ const keys = new Set();
 let isShooting = false;
 let shootCD = 0;
 const FIRE_RATE = 0.18;
-let playerDamageMult = 1; // default; updated each frame in update()
+let playerDamageMult = 1;
+// --- Global skill constants ---
+const SKILL_CD = { 1: 120, 2: 15, 3: 40, 4: 150 };
+const SKILL_DELAY_S = 0.85; // trava para 2..4
+ // default; updated each frame in update()
 
 
 // removed duplicate playerDamageMult (already declared globally)
@@ -98,6 +102,99 @@ window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
 window.addEventListener("mouseup", () => { isShooting = false; });
 canvas.addEventListener("mousemove", updateMouseWorld);
+
+// --- Global: handleSkillKey (used by key listener) ---
+function handleSkillKey(k) {
+  if (!player.alive) return;
+  if (!player.advancedClass) return;
+
+  // toggle skill-mode on key 1
+  if (k === 1) {
+    if ((player.skillCd?.[1] || 0) > 0) return;
+    if (!player.skillModeActive && (player.classBar || 0) <= 0) return;
+    player.skillModeActive = !player.skillModeActive;
+    if (!player.skillCd) player.skillCd = {1:0,2:0,3:0,4:0};
+    player.skillCd[1] = SKILL_CD[1];
+    return;
+  }
+  if ((player.skillGlobalDelay || 0) > 0) return;
+  if (!player.skillCd) player.skillCd = {1:0,2:0,3:0,4:0};
+  if ((player.skillCd[k] || 0) > 0) return;
+
+  const dmgBase = Math.max(1, player.dmg);
+  const shootTowardMouse = () => {
+    spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6);
+  };
+
+  if (player.advancedClass === "Berserker") {
+    if (k === 2) {
+      shootTowardMouse(); player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) {
+      if ((player.classBar || 0) <= 0) return;
+      if (!player.classBuffs) player.classBuffs = {};
+      player.classBuffs.berserkLeech = 6.0;
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) {
+      for (let i = 0; i < 6; i++) {
+        const angle = i * (Math.PI / 12) - Math.PI / 4;
+        const dirX = Math.cos(angle), dirY = Math.sin(angle);
+        spawnPlayerBullet(player.x, player.y, player.x + dirX, player.y + dirY, 22, dmgBase * 2.6, { dirX, dirY, life: 1.8 });
+      }
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "Ladino") {
+    if (k === 2) {
+      let best = null, bestD = 1e9, bestIdx = -1;
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i]; if (!e.alive) continue;
+        const d = Math.hypot(e.x - mouseWX, e.y - mouseWY);
+        if (d < bestD) { bestD = d; best = e; bestIdx = i; }
+      }
+      if (best) {
+        spawnPlayerBullet(player.x, player.y, best.x, best.y, 17, dmgBase * 1.8, { homing: true, aimId: bestIdx, life: 2.2, turnRate: 9, type: "ladino" });
+        player.skillCd[2] = SKILL_CD[2];
+      }
+    } else if (k === 3) {
+      if (!player.classBuffs) player.classBuffs = {};
+      player.classBuffs.ladinoCrit = 8.0;
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) {
+      const batch = 5, rounds = 4, gap = 0.5;
+      if (!player.classBuffs) player.classBuffs = {};
+      player.classBuffs.ladinoBurst = { remaining: rounds, timer: 0, gap, batch };
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "RageTank") {
+    if (k === 2) {
+      const mult = 1 + Math.min(1.0, (player.shieldMax > 0 ? player.shield / player.shieldMax : 0)) * 1.0;
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6 * mult);
+      const cost = Math.round((player.shieldMax || 0) * 0.08);
+      player.shield = Math.max(0, player.shield - cost);
+      player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) {
+      if (!player.classBuffs) player.classBuffs = {};
+      player.classBuffs.rageTankStacks = { timer: 10, stacks: 0, lastTargetId: null };
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) {
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 24, dmgBase * 3.2, { life: 2.0 });
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  } else if (player.advancedClass === "Paladino") {
+    if (k === 2) {
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.7);
+      player.skillCd[2] = SKILL_CD[2];
+    } else if (k === 3) {
+      if (!player.classBuffs) player.classBuffs = {};
+      player.classBuffs.palFaith = 10.0;
+      player.skillCd[3] = SKILL_CD[3];
+    } else if (k === 4) {
+      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 20, dmgBase * 2.8, { type: "pal_ult", life: 2.0 });
+      player.skillCd[4] = SKILL_CD[4];
+    }
+  }
+  if (k >= 2 && k <= 4) player.skillGlobalDelay = SKILL_DELAY_S;
+}
+
 // -- Global keyboard listener (moved out of handleInput to prevent duplicate registrations) --
 if (!window.__keysListenerBound) {
   window.__keysListenerBound = true;
@@ -123,115 +220,9 @@ function tryShoot() {
 let currentSlowFactor = 0;
 function handleInput(dt) {
 
-  /* ---------- Class Skills (1..4) ---------- */
-  const SKILL_CD = { 1: 120, 2: 15, 3: 40, 4: 150 };
-  const SKILL_DELAY_S = 0.85; // trava para 2..4
+    /* Class skills handled by global handleSkillKey/drawSkillHud */
 
-
-
-
-
-  function handleSkillKey(k) {
-    if (!player.advancedClass) return;
-    if (k === 1) {
-      if (player.skillCd?.[1] > 0) return;
-      if (!player.skillModeActive && (player.classBar || 0) <= 0) return;
-      player.skillModeActive = !player.skillModeActive;
-      player.skillCd[1] = SKILL_CD[1];
-      return;
-    }
-    if ((player.skillGlobalDelay || 0) > 0) return;
-    if ((player.skillCd?.[k] || 0) > 0) return;
-
-    const dmgBase = Math.max(1, player.dmg);
-    const shootTowardMouse = () => {
-      spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6);
-    };
-
-    if (player.advancedClass === "Berserker") {
-      if (k === 2) {
-        shootTowardMouse(); player.skillCd[2] = SKILL_CD[2];
-      } else if (k === 3) {
-        if ((player.classBar || 0) <= 0) return;
-        player.classBuffs.berserkLeech = 6.0;
-        player.skillCd[3] = SKILL_CD[3];
-      } else if (k === 4) {
-        for (let i = 0; i < 6; i++) {
-          const angle = i * (Math.PI / 12) - Math.PI / 4;
-          const dirX = Math.cos(angle), dirY = Math.sin(angle);
-          spawnPlayerBullet(player.x, player.y, player.x + dirX, player.y + dirY, 22, dmgBase * 2.6, { dirX, dirY, life: 1.8 });
-        }
-        player.skillCd[4] = SKILL_CD[4];
-      }
-    } else if (player.advancedClass === "Ladino") {
-      if (k === 2) {
-        let best = null, bestD = 1e9, bestIdx = -1;
-        for (let i = 0; i < enemies.length; i++) {
-          const e = enemies[i]; if (!e.alive) continue;
-          const d = Math.hypot(e.x - mouseWX, e.y - mouseWY);
-          if (d < bestD) { bestD = d; best = e; bestIdx = i; }
-        }
-        if (best) {
-          spawnPlayerBullet(player.x, player.y, best.x, best.y, 17, dmgBase * 1.8, { homing: true, aimId: bestIdx, life: 2.2, turnRate: 9, type: "ladino" });
-          player.skillCd[2] = SKILL_CD[2];
-        }
-      } else if (k === 3) {
-        player.classBuffs.ladinoCrit = 8.0;
-        player.skillCd[3] = SKILL_CD[3];
-      } else if (k === 4) {
-        const batch = 5, rounds = 4, gap = 0.5;
-        player.classBuffs.ladinoBurst = { remaining: rounds, timer: 0, gap, batch };
-        player.skillCd[4] = SKILL_CD[4];
-      }
-    } else if (player.advancedClass === "RageTank") {
-      if (k === 2) {
-        const mult = 1 + Math.min(1.0, (player.shieldMax > 0 ? player.shield / player.shieldMax : 0)) * 1.0;
-        spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.6 * mult);
-        const cost = Math.round((player.shieldMax || 0) * 0.08);
-        player.shield = Math.max(0, player.shield - cost);
-        player.skillCd[2] = SKILL_CD[2];
-      } else if (k === 3) {
-        player.classBuffs.rageTankStacks = { timer: 10, stacks: 0, lastTargetId: null };
-        player.skillCd[3] = SKILL_CD[3];
-      } else if (k === 4) {
-        spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 24, dmgBase * 3.2, { life: 2.0 });
-        player.skillCd[4] = SKILL_CD[4];
-      }
-    } else if (player.advancedClass === "Paladino") {
-      if (k === 2) {
-        spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 18, dmgBase * 1.7);
-        player.skillCd[2] = SKILL_CD[2];
-      } else if (k === 3) {
-        player.classBuffs.palFaith = 10.0;
-        player.skillCd[3] = SKILL_CD[3];
-      } else if (k === 4) {
-        spawnPlayerBullet(player.x, player.y, mouseWX, mouseWY, 20, dmgBase * 2.8, { type: "pal_ult", life: 2.0 });
-        player.skillCd[4] = SKILL_CD[4];
-      }
-    }
-    if (k >= 2 && k <= 4) player.skillGlobalDelay = SKILL_DELAY_S;
-  }
-
-  function drawSkillHud() {
-    const baseX = 20, baseY = viewH - 70, w = 44, h = 44, gap = 8;
-    ctx.save();
-    for (let i = 1; i <= 4; i++) {
-      const x = baseX + (i - 1) * (w + gap), y = baseY;
-      ctx.fillStyle = "#222a"; ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = "#8cf"; ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = "#fff"; ctx.font = "12px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(String(i), x + w / 2, y + h / 2);
-      const cd = player.skillCd?.[i] || 0;
-      if (cd > 0) {
-        const pct = Math.min(1, cd / SKILL_CD[i]);
-        ctx.fillStyle = "#000a"; ctx.fillRect(x, y, w, h * pct);
-        ctx.fillStyle = "#ffd"; ctx.fillText(Math.ceil(cd), x + w / 2, y + h - 8);
-      }
-    }
-    ctx.restore();
-  }
-
-  if (player.freezeTimer > 0) { player.freezeTimer -= dt; return; }
+if (player.freezeTimer > 0) { player.freezeTimer -= dt; return; }
   let vx = 0, vy = 0;
   if (keys.has("w") || keys.has("arrowup")) vy -= 1;
   if (keys.has("s") || keys.has("arrowdown")) vy += 1;
@@ -862,6 +853,27 @@ function drawPlayer() {
     ctx.strokeStyle = "#111"; ctx.strokeRect(sx - w / 2, sy - r - 18, w, h);
   }
 }
+
+// --- Global: drawSkillHud (used in drawAchievementOverlays) ---
+function drawSkillHud() {
+  const baseX = 20, baseY = viewH - 70, w = 44, h = 44, gap = 8;
+  ctx.save();
+  for (let i = 1; i <= 4; i++) {
+    const x = baseX + (i - 1) * (w + gap), y = baseY;
+    ctx.fillStyle = "#222a"; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "#8cf"; ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = "#fff"; ctx.font = "12px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(i), x + w / 2, y + h / 2);
+    const cd = player.skillCd?.[i] || 0;
+    if (cd > 0) {
+      const pct = Math.min(1, cd / SKILL_CD[i]);
+      ctx.fillStyle = "#000a"; ctx.fillRect(x, y, w, h * pct);
+      ctx.fillStyle = "#ffd"; ctx.fillText(Math.ceil(cd), x + w / 2, y + h - 8);
+    }
+  }
+  ctx.restore();
+}
+
 function drawAchievementOverlays() {
   drawAchievementIcons(); drawAchievementBanners(); drawMilestoneBadges();
   drawSkillHud();
@@ -881,6 +893,51 @@ function draw() {
 
 /* ---------- Loop ---------- */
 let lastTime = performance.now();
+
+// --- FIXED: tickClassBuffs (global) ---
+function tickClassBuffs(dt) {
+  if (!player.classBuffs) player.classBuffs = {};
+  // Berserker: roubo de vida temporário
+  if (player.classBuffs.berserkLeech && player.classBuffs.berserkLeech > 0) {
+    player.classBuffs.berserkLeech = Math.max(0, player.classBuffs.berserkLeech - dt);
+    if (player.classBuffs.berserkLeech === 0) delete player.classBuffs.berserkLeech;
+  }
+  // Ladino: crítico aumentado temporário
+  if (player.classBuffs.ladinoCrit && player.classBuffs.ladinoCrit > 0) {
+    player.classBuffs.ladinoCrit = Math.max(0, player.classBuffs.ladinoCrit - dt);
+    if (player.classBuffs.ladinoCrit === 0) delete player.classBuffs.ladinoCrit;
+  }
+  // Ladino: rajada (tiros automáticos em rodadas)
+  if (player.classBuffs.ladinoBurst) {
+    const b = player.classBuffs.ladinoBurst;
+    b.timer = (b.timer || 0) - dt;
+    if (b.remaining > 0 && b.timer <= 0) {
+      for (let i = 0; i < (b.batch || 4); i++) {
+        const spread = (Math.random() * 0.35) - 0.175;
+        const dx = mouseWX - player.x, dy = mouseWY - player.y;
+        const ang = Math.atan2(dy, dx) + spread;
+        const tx = player.x + Math.cos(ang), ty = player.y + Math.sin(ang);
+        const baseDmg = Math.max(1, player.dmg);
+        spawnPlayerBullet(player.x, player.y, tx, ty, 18, baseDmg * 1.2);
+      }
+      b.remaining -= 1;
+      b.timer = b.gap || 0.5;
+    }
+    if (b.remaining <= 0) delete player.classBuffs.ladinoBurst;
+  }
+  // RageTank: stacks expiram com o tempo
+  if (player.classBuffs.rageTankStacks) {
+    const st = player.classBuffs.rageTankStacks;
+    st.timer = Math.max(0, (st.timer || 0) - dt);
+    if (st.timer === 0) delete player.classBuffs.rageTankStacks;
+  }
+  // Paladino: fé temporária
+  if (player.classBuffs.palFaith && player.classBuffs.palFaith > 0) {
+    player.classBuffs.palFaith = Math.max(0, player.classBuffs.palFaith - dt);
+    if (player.classBuffs.palFaith === 0) delete player.classBuffs.palFaith;
+  }
+}
+
 function update() {
   const now = performance.now();
   const dt = Math.min(0.033, (now - lastTime) / 1000);
@@ -1000,62 +1057,16 @@ function maybeShowClassPanel() {
 
 
 // --- FIX: global classTick so update() can call it ---
+
+// --- FIXED: classTick (no nested function declarations) ---
 function classTick(dt) {
-  // Atualiza barra das classes avançadas e cooldowns
+  // Atualiza barra e cooldowns das classes avançadas
   if (player.advancedClass) {
     if (player.skillModeActive) {
       // Consome barra durante o modo ativo
       player.classBar = Math.max(0, (player.classBar || 0) - 1.5 * dt);
       if (player.classBar <= 0) { player.skillModeActive = false; }
-    
-
-/* --- FIX: tickClassBuffs — atualiza e aplica efeitos temporários das classes --- */
-function tickClassBuffs(dt) {
-  // estrutura segura
-  if (!player.classBuffs) player.classBuffs = {};
-  // Berserker: roubo de vida temporário durante a duração
-  if (player.classBuffs.berserkLeech && player.classBuffs.berserkLeech > 0) {
-    player.classBuffs.berserkLeech = Math.max(0, player.classBuffs.berserkLeech - dt);
-    if (player.classBuffs.berserkLeech === 0) delete player.classBuffs.berserkLeech;
-  }
-  // Ladino: crítico aumentado temporário
-  if (player.classBuffs.ladinoCrit && player.classBuffs.ladinoCrit > 0) {
-    player.classBuffs.ladinoCrit = Math.max(0, player.classBuffs.ladinoCrit - dt);
-    if (player.classBuffs.ladinoCrit === 0) delete player.classBuffs.ladinoCrit;
-  }
-  // Ladino: Rajada — dispara lotes automaticamente
-  if (player.classBuffs.ladinoBurst) {
-    const b = player.classBuffs.ladinoBurst;
-    b.timer = (b.timer || 0) - dt;
-    if (b.remaining > 0 && b.timer <= 0) {
-      // dispara "batch" projéteis numa pequena dispersão em direção ao mouse
-      for (let i = 0; i < (b.batch || 4); i++) {
-        const spread = (Math.random() * 0.35) - 0.175; // +-10 graus aprox
-        const dx = mouseWX - player.x, dy = mouseWY - player.y;
-        const ang = Math.atan2(dy, dx) + spread;
-        const tx = player.x + Math.cos(ang), ty = player.y + Math.sin(ang);
-        const baseDmg = Math.max(1, player.dmg);
-        spawnPlayerBullet(player.x, player.y, tx, ty, 18, baseDmg * 1.2);
-      }
-      b.remaining -= 1;
-      b.timer = b.gap || 0.5;
-    }
-    if (b.remaining <= 0) delete player.classBuffs.ladinoBurst;
-  }
-  // RageTank: pilhas na mira — expiram com o tempo
-  if (player.classBuffs.rageTankStacks) {
-    const st = player.classBuffs.rageTankStacks;
-    st.timer = Math.max(0, (st.timer || 0) - dt);
-    if (st.timer === 0) delete player.classBuffs.rageTankStacks;
-  }
-  // Paladino: Fé — duração
-  if (player.classBuffs.palFaith && player.classBuffs.palFaith > 0) {
-    player.classBuffs.palFaith = Math.max(0, player.classBuffs.palFaith - dt);
-    if (player.classBuffs.palFaith === 0) delete player.classBuffs.palFaith;
-  }
-}
-
-} else {
+    } else {
       const max = player.classBarMax || 0;
       const cur = player.classBar || 0;
       if (player.advancedClass === "Berserker") {
@@ -1063,14 +1074,13 @@ function tickClassBuffs(dt) {
       } else if (player.advancedClass === "Ladino") {
         player.classBar = Math.min(max, cur + 3 * dt);
       } else if (player.advancedClass === "RageTank") {
-        // ganha um pouco mais se estiver com escudo
         player.classBar = Math.min(max, cur + 2 * dt + (player.shield > 0 ? 1 * dt : 0));
       } else if (player.advancedClass === "Paladino") {
         player.classBar = Math.min(max, cur + 5 * dt);
       }
     }
   }
-  // resfriamento global e individuais
+  // Resfriamento global e individuais
   player.skillGlobalDelay = Math.max(0, (player.skillGlobalDelay || 0) - dt);
   if (!player.skillCd) player.skillCd = { 1: 0, 2: 0, 3: 0, 4: 0 };
   for (const k of [1, 2, 3, 4]) player.skillCd[k] = Math.max(0, (player.skillCd[k] || 0) - dt);
