@@ -290,6 +290,28 @@ function drawSkillHud(){
   player.y = clamp(player.y + vy * spd, r, MAP_H - r);
 }
 
+// Global copy (fix): drawSkillHud hoisted for overlay use
+const GLOBAL_SKILL_CD = {1:120,2:15,3:40,4:150};
+function drawSkillHud(){
+  const baseX = 20, baseY = viewH - 70, w=44, h=44, gap=8;
+  ctx.save();
+  for (let i=1;i<=4;i++){
+    const x = baseX + (i-1)*(w+gap), y=baseY;
+    ctx.fillStyle = "#222a"; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle="#8cf"; ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(String(i), x+w/2, y+h/2);
+    const cd = player.skillCd?.[i]||0;
+    if (cd>0){
+      const pct = Math.min(1, cd / (typeof SKILL_CD!=='undefined'?SKILL_CD:GLOBAL_SKILL_CD)[i]);
+      ctx.fillStyle="#000a"; ctx.fillRect(x, y, w, h*pct);
+      ctx.fillStyle="#ffd"; ctx.fillText(Math.ceil(cd), x+w/2, y+h-8);
+    }
+  }
+  ctx.restore();
+}
+
+
 // Global copy (fix): tickClassBuffs to be used in update()
 function tickClassBuffs(dt){
   if (!player.classBuffs) return;
