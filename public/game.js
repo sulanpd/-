@@ -369,6 +369,12 @@ function initGame() {
 const hudHp = document.getElementById("hp");
 const hudLvl = document.getElementById("level");
 const hudScore = document.getElementById("score");
+
+// Cache and throttle for HUD updates
+const hudClassNameEl = document.getElementById('className');
+const hudClassBarEl = document.getElementById('classBar');
+let _lastHudUpdate = 0;
+const HUD_MIN_INTERVAL = 0.10; // seconds
 const spanPoints = document.getElementById("points");
 const xpbar = document.getElementById("xpbar");
 const eventMsg = document.getElementById("eventMsg");
@@ -386,7 +392,7 @@ function updateRebornBadge() {
   rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n*25}%`;
 }
 
-function updateHUD() {
+function updateHUD() { const nowHud = performance.now()/1000; if (nowHud - _lastHudUpdate < HUD_MIN_INTERVAL) return; _lastHudUpdate = nowHud;
   if (hudHp) hudHp.textContent = `${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`;
   if (hudLvl) hudLvl.textContent = player.level;
   if (hudScore) hudScore.textContent = score;
@@ -394,9 +400,8 @@ function updateHUD() {
   if (xpbar) { const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext)); xpbar.style.width = Math.floor(pct * 100) + "%"; }
   if (dmgReduceIcon) dmgReduceIcon.style.display = (player.milestones.def10 ? "flex" : "none");
   updateRebornBadge(); maybeShowClassPanel();
-  const cNameEl = document.getElementById('className'); const cBarEl = document.getElementById('classBar');
-  if (cNameEl) cNameEl.textContent = player.advancedClass || '-';
-  if (cBarEl){ const pct = (player.classBarMax>0? Math.max(0,Math.min(1, player.classBar/player.classBarMax)):0); cBarEl.style.width = Math.floor(pct*100)+'%'; }
+  if (hudClassNameEl) hudClassNameEl.textContent = player.advancedClass || '-';
+  if (hudClassBarEl){ const pct = (player.classBarMax>0? Math.max(0,Math.min(1, player.classBar/player.classBarMax)):0); hudClassBarEl.style.width = Math.floor(pct*100)+'%'; }
   if (rankBtn) {
     const unlocked = rankUnlocked();
     const next = unlocked ? getNextRank() : null;
