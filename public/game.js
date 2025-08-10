@@ -93,7 +93,20 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
 window.addEventListener("mouseup", () => { isShooting = false; });
-canvas.addEventListener("mousemove", updateMouseWorld);
+canvas.addEventListener("mousemove", updat
+// -- Global keyboard listener (moved out of handleInput to prevent duplicate registrations) --
+if (!window.__keysListenerBound){
+  window.__keysListenerBound = true;
+  window.addEventListener("keydown", (e)=>{
+    if (!player.alive) return;
+    const k = e.key;
+    if (k==='1') handleSkillKey(1);
+    else if (k==='2') handleSkillKey(2);
+    else if (k==='3') handleSkillKey(3);
+    else if (k==='4') handleSkillKey(4);
+  });
+}
+eMouseWorld);
 
 function tryShoot(){
   if (!player.alive) return;
@@ -111,63 +124,9 @@ function handleInput(dt) {
 const SKILL_CD = {1:120, 2:15, 3:40, 4:150};
 const SKILL_DELAY_S = 0.85; // trava para 2..4
 
-function classTick(dt){
-  if (player.advancedClass){
-    if (player.skillModeActive){
-      // consome barra durante o Modo
-      player.classBar = Math.max(0, player.classBar - 1.5*dt);
-      if (player.classBar <= 0){ player.skillModeActive = false; }
-    } else {
-      if (player.advancedClass === "Berserker") {
-        player.classBar = Math.min(player.classBarMax, player.classBar + 4*dt);
-      } else if (player.advancedClass === "Ladino") {
-        player.classBar = Math.min(player.classBarMax, player.classBar + 3*dt);
-      } else if (player.advancedClass === "RageTank") {
-        player.classBar = Math.min(player.classBarMax, player.classBar + 2*dt + (player.shield>0?1*dt:0));
-      } else if (player.advancedClass === "Paladino") {
-        player.classBar = Math.min(player.classBarMax, player.classBar + 5*dt);
-      }
-    }
-  }
-  player.skillGlobalDelay = Math.max(0, (player.skillGlobalDelay||0) - dt);
-  if (!player.skillCd) player.skillCd = {1:0,2:0,3:0,4:0};
-  for (const k of [1,2,3,4]) player.skillCd[k] = Math.max(0, (player.skillCd[k]||0) - dt);
-}
 
-function tickClassBuffs(dt){
-  if (!player.classBuffs) return;
-  // decrement numbers
-  for (const key of Object.keys(player.classBuffs)){
-    const v = player.classBuffs[key];
-    if (typeof v === "number"){
-      player.classBuffs[key] = Math.max(0, v - dt);
-      if (player.classBuffs[key] === 0) delete player.classBuffs[key];
-    } else if (v && typeof v === "object" && v.timer !== undefined){
-      v.timer -= dt;
-      if (v.timer <= 0){
-        // Ladino burst scheduler
-        if (v.remaining > 0){
-          v.timer = v.gap;
-          v.remaining--;
-          // escolhe inimigo mais próximo
-          let bestIdx=-1, bestD=1e9;
-          for (let i=0;i<enemies.length;i++){
-            const e=enemies[i]; if(!e.alive) continue;
-            const d=Math.hypot(e.x-player.x, e.y-player.y);
-            if (d<bestD){bestD=d; bestIdx=i;}
-          }
-          if (bestIdx>=0){
-            for (let j=0;j<v.batch;j++){
-              spawnPlayerBullet(player.x, player.y, player.x+1, player.y, 18, Math.max(1,player.dmg)*1.1, {homing:true, aimId:bestIdx, life:1.6, turnRate:10, type:"ladino_burst"});
-            }
-          }
-        } else {
-          delete player.classBuffs[key];
-        }
-      }
-    }
-  }
-}
+
+
 
 function handleSkillKey(k){
   if (!player.advancedClass) return;
@@ -249,15 +208,6 @@ function handleSkillKey(k){
   if (k>=2 && k<=4) player.skillGlobalDelay = SKILL_DELAY_S;
 }
 
-window.addEventListener("keydown", (e)=>{
-  if (!player.alive) return;
-  const k = e.key;
-  if (k==='1') handleSkillKey(1);
-  else if (k==='2') handleSkillKey(2);
-  else if (k==='3') handleSkillKey(3);
-  else if (k==='4') handleSkillKey(4);
-});
-
 function drawSkillHud(){
   const baseX = 20, baseY = viewH - 70, w=44, h=44, gap=8;
   ctx.save();
@@ -289,65 +239,6 @@ function drawSkillHud(){
   player.x = clamp(player.x + vx * spd, r, MAP_W - r);
   player.y = clamp(player.y + vy * spd, r, MAP_H - r);
 }
-
-// Global copy (fix): drawSkillHud hoisted for overlay use
-const GLOBAL_SKILL_CD = {1:120,2:15,3:40,4:150};
-function drawSkillHud(){
-  const baseX = 20, baseY = viewH - 70, w=44, h=44, gap=8;
-  ctx.save();
-  for (let i=1;i<=4;i++){
-    const x = baseX + (i-1)*(w+gap), y=baseY;
-    ctx.fillStyle = "#222a"; ctx.fillRect(x,y,w,h);
-    ctx.strokeStyle="#8cf"; ctx.strokeRect(x,y,w,h);
-    ctx.fillStyle="#fff"; ctx.font="12px Arial"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(String(i), x+w/2, y+h/2);
-    const cd = player.skillCd?.[i]||0;
-    if (cd>0){
-      const pct = Math.min(1, cd / (typeof SKILL_CD!=='undefined'?SKILL_CD:GLOBAL_SKILL_CD)[i]);
-      ctx.fillStyle="#000a"; ctx.fillRect(x, y, w, h*pct);
-      ctx.fillStyle="#ffd"; ctx.fillText(Math.ceil(cd), x+w/2, y+h-8);
-    }
-  }
-  ctx.restore();
-}
-
-
-// Global copy (fix): tickClassBuffs to be used in update()
-function tickClassBuffs(dt){
-  if (!player.classBuffs) return;
-  // decrement numbers
-  for (const key of Object.keys(player.classBuffs)){
-    const v = player.classBuffs[key];
-    if (typeof v === "number"){
-      player.classBuffs[key] = Math.max(0, v - dt);
-      if (player.classBuffs[key] === 0) delete player.classBuffs[key];
-    } else if (v && typeof v === "object" && v.timer !== undefined){
-      v.timer -= dt;
-      if (v.timer <= 0){
-        // Ladino burst scheduler
-        if (v.remaining > 0){
-          v.timer = v.gap;
-          v.remaining--;
-          // escolhe inimigo mais próximo
-          let bestIdx=-1, bestD=1e9;
-          for (let i=0;i<enemies.length;i++){
-            const e=enemies[i]; if(!e.alive) continue;
-            const d=Math.hypot(e.x-player.x, e.y-player.y);
-            if (d<bestD){bestD=d; bestIdx=i;}
-          }
-          if (bestIdx>=0){
-            for (let j=0;j<v.batch;j++){
-              spawnPlayerBullet(player.x, player.y, player.x+1, player.y, 18, Math.max(1,player.dmg)*1.1, {homing:true, aimId:bestIdx, life:1.6, turnRate:10, type:"ladino_burst"});
-            }
-          }
-        } else {
-          delete player.classBuffs[key];
-        }
-      }
-    }
-  }
-}
-
 function centerCameraOnPlayer() {
   cam.x = clamp(player.x - viewW / 2, 0, Math.max(0, MAP_W - viewW));
   cam.y = clamp(player.y - viewH / 2, 0, Math.max(0, MAP_H - viewH));
@@ -369,12 +260,6 @@ function initGame() {
 const hudHp = document.getElementById("hp");
 const hudLvl = document.getElementById("level");
 const hudScore = document.getElementById("score");
-
-// Cache and throttle for HUD updates
-const hudClassNameEl = document.getElementById('className');
-const hudClassBarEl = document.getElementById('classBar');
-let _lastHudUpdate = 0;
-const HUD_MIN_INTERVAL = 0.10; // seconds
 const spanPoints = document.getElementById("points");
 const xpbar = document.getElementById("xpbar");
 const eventMsg = document.getElementById("eventMsg");
@@ -392,7 +277,7 @@ function updateRebornBadge() {
   rebornBadge.title = `Reborns: ${n}/3 • Bônus XP: +${n*25}%`;
 }
 
-function updateHUD() { const nowHud = performance.now()/1000; if (nowHud - _lastHudUpdate < HUD_MIN_INTERVAL) return; _lastHudUpdate = nowHud;
+function updateHUD() {
   if (hudHp) hudHp.textContent = `${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`;
   if (hudLvl) hudLvl.textContent = player.level;
   if (hudScore) hudScore.textContent = score;
@@ -400,8 +285,9 @@ function updateHUD() { const nowHud = performance.now()/1000; if (nowHud - _last
   if (xpbar) { const pct = Math.max(0, Math.min(1, player.xp / player.xpToNext)); xpbar.style.width = Math.floor(pct * 100) + "%"; }
   if (dmgReduceIcon) dmgReduceIcon.style.display = (player.milestones.def10 ? "flex" : "none");
   updateRebornBadge(); maybeShowClassPanel();
-  if (hudClassNameEl) hudClassNameEl.textContent = player.advancedClass || '-';
-  if (hudClassBarEl){ const pct = (player.classBarMax>0? Math.max(0,Math.min(1, player.classBar/player.classBarMax)):0); hudClassBarEl.style.width = Math.floor(pct*100)+'%'; }
+  const cNameEl = document.getElementById('className'); const cBarEl = document.getElementById('classBar');
+  if (cNameEl) cNameEl.textContent = player.advancedClass || '-';
+  if (cBarEl){ const pct = (player.classBarMax>0? Math.max(0,Math.min(1, player.classBar/player.classBarMax)):0); cBarEl.style.width = Math.floor(pct*100)+'%'; }
   if (rankBtn) {
     const unlocked = rankUnlocked();
     const next = unlocked ? getNextRank() : null;
