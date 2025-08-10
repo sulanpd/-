@@ -328,28 +328,104 @@ export function updateEnemies(dt, safeZones) {
       if (best) { target = best; targetType = "block"; distTarget = bestD; }
     }
 
-    // Movimento (standoff: aproxima se longe, recua se perto, strafing quando em alcance)
+        // Movimento (standoff + anti-órbita + separação + coesão do mapa)
     if (target){
+      // Vetores básicos
       const dxT = (target.x - e.x), dyT = (target.y - e.y);
       const d = Math.max(1, Math.hypot(dxT, dyT));
       const desired = STANDOFF[e.type] || 340;
-      const tooFar = d > desired * 1.10;
-      const tooClose = d < desired * 0.90;
+      const tooFar = d > desired * 1.12;
+      const tooClose = d < desired * 0.88;
 
-      let mvx = 0, mvy = 0;
-      if (tooFar) {
-        mvx = dxT / d; mvy = dyT / d;              // aproxima
-      } else if (tooClose) {
-        mvx = -dxT / d; mvy = -dyT / d;            // recua
-      } else {
-        // strafe perpendicular
-        const sx = -dyT / d, sy = dxT / d;
-        const dir = (e._strafeDir || (Math.random() < 0.5 ? 1 : -1));
-        e._strafeDir = dir;
-        mvx = sx * dir; mvy = sy * dir;
+      // Direções unitárias
+      const toTargetX = dxT / d, toTargetY = dyT / d;
+      const tangentX  = -toTargetY, tangentY = toTargetX; // 90°
+
+      // Anti-sincronização: cada inimigo mantém um strafeDir com flips aleatórios
+      if (e._strafeSwitchCd === undefined) e._strafeSwitchCd = 0;
+      e._strafeSwitchCd -= dt;
+      if (e._strafeSwitchCd <= 0) {
+        // 0.8 a 2.2s entre flips, ligeiro viés para inverter quando está há muito tempo orbitando
+        const bias = Math.min(0.6, (e._orbitTimer||0) * 0.12);
+        if (Math.random() < 0.25 + bias) e._strafeDir = (e._strafeDir||1) * -1;
+        e._strafeSwitchCd = 0.8 + Math.random()*1.4;
       }
-      e.x += mvx * e.speed * 60 * dt;
-      e.y += mvy * e.speed * 60 * dt;
+      if (!e._strafeDir) e._strafeDir = Math.random() < 0.5 ? 1 : -1;
+
+      // PD de distância: empurra para desired quebrando órbita infinita
+      const distErr = (d - desired);
+      const distForce = Math.max(-1, Math.min(1, (distErr / desired))); // -1..1
+      const approachX = toTargetX * (distForce);
+      const approachY = toTargetY * (distForce);
+
+      // Strafing com ruído individual
+      if (e._noisePhase === undefined) e._noisePhase = Math.random()*1000;
+      e._noisePhase += dt * (0.5 + Math.random()*0.5);
+      const jitter = (Math.sin(e._noisePhase*1.7) + Math.cos(e._noisePhase*1.3))*0.15;
+      const strafeX = tangentX * (e._strafeDir) * (0.75 + 0.25*Math.sin(e._noisePhase*2.1)) + toTargetX * jitter*0.2;
+      const strafeY = tangentY * (e._strafeDir) * (0.75 + 0.25*Math.sin(e._noisePhase*2.1)) + toTargetY * jitter*0.2;
+
+      // Separação de vizinhos: evita que andem colados/iguais
+      let sepX = 0, sepY = 0, count = 0;
+      for (const other of enemies){
+        if (other===e || !other.alive) continue;
+        const dx = e.x - other.x, dy = e.y - other.y;
+        const distN = Math.hypot(dx,dy);
+        const NEAR = 140; // raio de vizinhança
+        if (distN > 0 && distN < NEAR){
+          const w = (NEAR - distN) / NEAR; // 0..1
+          sepX += (dx/distN) * w;
+          sepY += (dy/distN) * w;
+          count++;
+        }
+      }
+      if (count>0){ sepX/=count; sepY/=count; }
+
+      // Coesão para o centro do mapa (média das safe zones)
+      let cx = 0, cy = 0;
+      if (safeZones && safeZones.length){
+        for (const s of safeZones){ cx += s.x; cy += s.y; }
+        cx /= safeZones.length; cy /= safeZones.length;
+      } else { cx = player.x; cy = player.y; }
+      const dcx = cx - e.x, dcy = cy - e.y;
+      const distC = Math.hypot(dcx,dcy) || 1;
+      const cohesionX = (dcx/distC) * 0.15; // força fraca
+      const cohesionY = (dcy/distC) * 0.15;
+
+      // Edge-avoid (caso fujam para longe do centro): aumenta com a distância do centro
+      const edgePush = Math.min(0.9, Math.max(0, (distC - 1200) / 1200)); // 0..~0.9
+      const leashX = cohesionX * edgePush;
+      const leashY = cohesionY * edgePush;
+
+      // Combina forças
+      let mvx = 0, mvy = 0;
+      if (tooFar) { mvx = toTargetX; mvy = toTargetY; }           // aproxima decisivo
+      else if (tooClose) { mvx = -toTargetX; mvy = -toTargetY; }  // recua curto
+      else {
+        // em alcance: mistura strafe + ajuste radial + separação
+        mvx = strafeX * 0.85 + approachX * 0.35 + sepX * 0.60 + leashX * 0.40;
+        mvy = strafeY * 0.85 + approachY * 0.35 + sepY * 0.60 + leashY * 0.40;
+      }
+
+      // Normaliza
+      const ml = Math.hypot(mvx,mvy) || 1;
+      mvx/=ml; mvy/=ml;
+
+      // Anti-órbita longa: se ficar mais de 2.5s orbitando sem reduzir |distErr|, inverte e dá impulso radial
+      const tangential = Math.abs(mvx * tangentX + mvy * tangentY); // 0..1
+      if (e._orbitTimer === undefined) e._orbitTimer = 0;
+      if (tangential > 0.8 && Math.abs(distErr) < desired*0.08) e._orbitTimer += dt;
+      else e._orbitTimer = Math.max(0, e._orbitTimer - dt*0.5);
+      if (e._orbitTimer > 2.5){
+        e._strafeDir *= -1;
+        mvx += toTargetX * 0.6; mvy += toTargetY * 0.6;
+        e._orbitTimer = 0.6; // cooldown
+      }
+
+      // Velocidade com leve ruído para quebrar lockstep
+      const spdNoise = 0.9 + (Math.sin(e._noisePhase*0.9)*0.1);
+      e.x += mvx * e.speed * spdNoise * 60 * dt;
+      e.y += mvy * e.speed * spdNoise * 60 * dt;
     } else {
       // wander
       e.wander.t -= dt;
@@ -361,9 +437,7 @@ export function updateEnemies(dt, safeZones) {
       const d = Math.max(1, Math.hypot(e.wander.tx - e.x, e.wander.ty - e.y));
       e.x += (e.wander.tx - e.x)/d * e.speed * 40 * dt;
       e.y += (e.wander.ty - e.y)/d * e.speed * 40 * dt;
-    }
-
-    // Tiro de TODOS os inimigos (agora todos atiram no alvo atual; prioridade: Player > Inimigos > Blocos)
+    }// Tiro de TODOS os inimigos (agora todos atiram no alvo atual; prioridade: Player > Inimigos > Blocos)
     if (target) {
       const prof = FIRE_PROFILE[e.type] || FIRE_PROFILE.basic;
       const inRange = distTarget < (STANDOFF[e.type] || 340) + 140; // margem para começar a atirar
