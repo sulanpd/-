@@ -4,20 +4,36 @@
  * ===================================================================== */
 export const playerBullets = [];
 let projectileRangeMult = 1;
-export function setProjectileRangeMult(mult) {
+
+export function setProjectileRangeMult(mult){
   projectileRangeMult = Math.max(0.1, mult || 1);
 }
 
-export function spawnPlayerBullet(sx, sy, tx, ty, speedPxPerFrame, damage, opts = {}) {
-  const dx = (opts?.dirX ?? (tx - sx)), dy = (opts?.dirY ?? (ty - sy));
-  const d = Math.hypot(dx, dy) || 1;
-  const vx = (dx / d) * speedPxPerFrame;
-  const vy = (dy / d) * speedPxPerFrame;
+/**
+ * Dispara um projétil do jogador.
+ * @param {number} sx - x de origem
+ * @param {number} sy - y de origem
+ * @param {number} tx - x de alvo (ou direção quando usado dirX/dirY)
+ * @param {number} ty - y de alvo
+ * @param {number} speedPxPerFrame - velocidade base (em px por frame a 60fps)
+ * @param {number} damage - dano base
+ * @param {object} opts - opções: { dirX, dirY, life, type, homing, aimId, turnRate }
+ */
+export function spawnPlayerBullet(sx, sy, tx, ty, speedPxPerFrame, damage, opts={}) {
+  const dx0 = (opts?.dirX ?? (tx - sx));
+  const dy0 = (opts?.dirY ?? (ty - sy));
+  const d = Math.hypot(dx0, dy0) || 1;
+  const vx = (dx0/d) * speedPxPerFrame;
+  const vy = (dy0/d) * speedPxPerFrame;
   const baseLife = opts?.life ?? 1.4;
   playerBullets.push({
-    x: sx, y: sy, vx, vy, life: baseLife * projectileRangeMult, alive: true, damage,
+    x:sx, y:sy,
+    vx, vy,
+    life: baseLife * projectileRangeMult,
+    alive:true,
+    damage,
     type: opts?.type || "normal",
-    aimId: opts?.aimId || null,   // id do alvo (índice de enemies), se homing
+    aimId: opts?.aimId ?? null,   // id do alvo (índice de enemies), se homing
     homing: !!opts?.homing,
     turnRate: opts?.turnRate ?? 6, // rad/s
     speed: speedPxPerFrame
@@ -27,16 +43,16 @@ export function spawnPlayerBullet(sx, sy, tx, ty, speedPxPerFrame, damage, opts 
 export function updatePlayerBullets(dt) {
   for (const b of playerBullets) {
     if (!b.alive) continue;
-    if (b.homing && typeof window.__getEnemyRef === "function") {
+    if (b.homing && typeof window !== 'undefined' && typeof window.__getEnemyRef === "function") {
       const t = window.__getEnemyRef(b.aimId);
       if (t && t.alive) {
         const dx = t.x - b.x, dy = t.y - b.y;
         const ang = Math.atan2(b.vy, b.vx);
         const angTo = Math.atan2(dy, dx);
         let da = angTo - ang;
-        while (da > Math.PI) da -= Math.PI * 2;
-        while (da < -Math.PI) da += Math.PI * 2;
-        const maxTurn = b.turnRate * dt;
+        while (da > Math.PI) da -= Math.PI*2;
+        while (da < -Math.PI) da += Math.PI*2;
+        const maxTurn = (b.turnRate ?? 6) * dt;
         const newAng = ang + Math.max(-maxTurn, Math.min(maxTurn, da));
         b.vx = Math.cos(newAng) * b.speed;
         b.vy = Math.sin(newAng) * b.speed;
@@ -49,12 +65,13 @@ export function updatePlayerBullets(dt) {
   }
 }
 
-
 export function drawPlayerBullets(ctx, cam) {
   ctx.fillStyle = "#7ee7ff";
   for (const b of playerBullets) {
     if (!b.alive) continue;
     const sx = Math.floor(b.x - cam.x), sy = Math.floor(b.y - cam.y);
-    ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5, 0, Math.PI*2);
+    ctx.fill();
   }
 }
