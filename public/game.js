@@ -96,7 +96,13 @@ function updateMouseWorld(e) {
 }
 window.addEventListener("keydown", e => {
   keys.add(e.key.toLowerCase());
-  if (e.key.toLowerCase() === "escape") { toggleSkills(false); toggleReborn(false); }
+  if (e.key.toLowerCase() === "escape") { 
+    toggleSkills(false); 
+    toggleReborn(false); 
+    toggleRank(false);
+    const classPanel = document.getElementById('classPanel');
+    if (classPanel) classPanel.style.display = 'none';
+  }
 });
 window.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 canvas.addEventListener("mousedown", e => { if (!player.alive) return; updateMouseWorld(e); isShooting = true; tryShoot(); });
